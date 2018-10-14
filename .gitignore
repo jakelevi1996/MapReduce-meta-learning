@@ -1,1 +1,7 @@
+# Ignore images:
 **.png
+
+# Ignore npz data files:
+**.npz
+
+temp.py
