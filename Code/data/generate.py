@@ -2,87 +2,61 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 DEFAULT_FILENAME = "Code/data/sinusoid_metadataset.npz"
+DEFAULT_IMAGE_NAME = "Code/data/sample_data"
 
-def generate_sinusoid(
-    num_tasks=1, num_points=50,
-    x_min=0, x_max=1,
-    phase=0, amplitude=1, freq=1,
-):
-    """Generate sinusoid data, and return 2 np.ndarrays with shape
-    (num_tasks, num_points) with the given characteristics. X values are
-    sampled randomly and uniformly between specified limits.
+def random_x(x_lim=[0, 1], num_tasks=1, num_points=50):
+    return np.random.uniform(*x_lim, size=(num_tasks, num_points))
+
+def deterministic_sinusoid_set(X, phase=0, amplitude=1, freq=1):
+    """
+    Generate and return an ndarray of sinusoid data with the same shape as
+    input data X and the given characteristics.
 
     phase, amplitude, freq can each be scalars, in which case that set of
-    scalars is shared across all tasks, or vectors of length num_task, in which
-    case an individual set of phase, amplitude and freq is used for each task
+    scalars is shared across all tasks, or arrays with shape (num_tasks, 1),
+    where num_tasks = X.shape[0], in which case an individual set of phase,
+    amplitude and freq is used for each task.
     """
-    # Generate matrix of X values
-    X = np.random.uniform(x_min, x_max, size=(num_tasks, num_points))
-    # Generate matrix of Y values
-    # NB X must be transposed, so that task-specific phase, amplitude and freq
-    # can be summed automatically along the task axis
-    Y = (amplitude * np.sin(2*np.pi*freq*X.T + phase)).T
-    return X, Y
+    return amplitude * np.sin(2*np.pi*freq*X + phase)
 
-def generate_sinusoid_set(
+def random_sinusoid_set(
     num_tasks=10, num_points=50,
-    x_min=0, x_max=1,
-    phase_min=0, phase_max=2*np.pi,
-    amplitude_min=0.5, amplitude_max=2,
-    freq_min=1, freq_max=2,
+    x_lim=[0, 1], phase_lim=[0, 2*np.pi],
+    amplitude_lim=[0.5, 2], freq_lim=[0.5, 3],
 ):
-    phase       = np.random.uniform(phase_min,      phase_max,      num_tasks)
-    amplitude   = np.random.uniform(amplitude_min,  amplitude_max,  num_tasks)
-    freq        = np.random.uniform(freq_min,       freq_max,       num_tasks)
+    # Generate random task-specific phase:
+    phase = np.random.uniform(*phase_lim, (num_tasks, 1))
+    # Generate random task-specific amplitude:
+    amplitude = np.random.uniform(*amplitude_lim, (num_tasks, 1))
+    # Generate random task-specific frequency:
+    freq = np.random.uniform(*freq_lim, (num_tasks, 1))
 
-    X, Y = generate_sinusoid(
-        num_tasks, num_points, x_min, x_max, phase, amplitude, freq
-    )
+    X = random_x(x_lim, num_tasks, num_points)
+    Y = deterministic_sinusoid_set(X, phase, amplitude, freq)
     
     return X, Y
 
 
-def generate_sinusoid_metaset_random(
-    filename=DEFAULT_FILENAME,
-    num_train_tasks=20, num_train_points=50,
-    num_valid_tasks=5, num_valid_points=10,
-    num_test_tasks=5, num_test_points=10,
-):
-    X_metatrain, Y_metatrain = generate_sinusoid_set(
-        num_train_tasks, num_train_points
-    )
-    X_metavalid, Y_metavalid = generate_sinusoid_set(
-        num_valid_tasks, num_valid_points
-    )
-    X_metatest, Y_metatest = generate_sinusoid_set(
-        num_test_tasks, num_test_points
-    )
-
-    np.savez(
-        filename,
-        X_metatrain=X_metatrain, Y_metatrain=Y_metatrain,
-        X_metavalid=X_metavalid, Y_metavalid=Y_metavalid,
-        X_metatest=X_metatest, Y_metatest=Y_metatest,
-    )
-
 def generate_sinusoid_metaset_grid():
     pass
 
-
-if __name__ == "__main__":
-    x, y = generate_sinusoid(num_points=20)
-    # print(x, y)
-    # print(x.shape)
+def plot_data(x, y, filename=DEFAULT_IMAGE_NAME, format_str='bx'):
     plt.figure()
-    plt.plot(x, y, 'bx')
+    plt.plot(x, y, format_str)
     plt.grid(True)
-    plt.savefig("./Code/data/sample_data")
+    plt.savefig(filename)
     plt.close()
 
+if __name__ == "__main__":
+    # Test generating sinusoids:
+    x, y = random_sinusoid_set(num_tasks=1, num_points=20)
+    print(x.shape)
+    plot_data(x, y)
+
+    # Test generating sinusoid sets:
     num_tasks = 3
-    X, Y = generate_sinusoid_set(
+    X, Y = random_sinusoid_set(
         num_tasks, num_points=50,
-        x_min=0, x_max=1,
         # phase_min=0, phase_max=1,
         # amplitude_min=1, amplitude_max=1,
         # freq_min=1, freq_max=1,
@@ -91,18 +65,6 @@ if __name__ == "__main__":
     print(X[1].shape)
     for i in range(num_tasks):
         x, y = X[i], Y[i]
-        print(i)
-        print(x.shape, y.shape)
-        plt.figure()
-        plt.plot(x, y, 'bx')
-        plt.grid(True)
-        plt.savefig("./Code/data/sample_data_{}".format(i))
-        plt.close()
-    generate_sinusoid_metaset_random(
-        DEFAULT_FILENAME, 2, 4, 2, 4, 2, 4
-    )
-    with np.load(DEFAULT_FILENAME) as data:
-        print(data.files)
-        print(data)
-        for f in data.files:
-            print(data[f])
+        print(i, x.shape, y.shape)
+        filename = DEFAULT_IMAGE_NAME + "_{}".format(i)
+        plot_data(x, y, filename)
