@@ -21,10 +21,10 @@ class NeuralRegressor():
         self, input_dim, num_layers, num_hidden_units, hidden_activation,
         learning_rate, 
     ):
-
-        # Define network
         # TODO: add regulariser
         # TODO: allow multiple layers by specifying num_hidden_units as a list
+
+        # Define network
         self.x_placeholder = tf.placeholder(
             dtype=tf.float32,
             shape=(None, input_dim),
@@ -93,10 +93,11 @@ class NeuralRegressor():
         return predictions
     
     def eval_loss(self, sess, x, y):
-        sess.run(
+        loss = sess.run(
             fetches=self.loss_op,
             feed_dict={self.x_placeholder: x, self.y_placeholder: y}
         )
+        return loss
 
     def training_step(self, sess, x, y):
         sess.run(
@@ -133,13 +134,13 @@ class ReptileRegressor(NeuralRegressor):
         input_dim=1, num_layers=2, num_hidden_units=15,
         hidden_activation=tf.tanh,
         # Meta-params:
-        inner_learning_rate=0.01, outer_learning_rate=1,
-        num_inner_steps=5, num_outer_steps=5,
+        inner_learning_rate=0.01, num_inner_steps=32,
+        # outer_learning_rate=1, num_outer_steps=5,
     ):
-        self.inner_learning_rate = inner_learning_rate
+        # self.inner_learning_rate = inner_learning_rate
         # self.outer_learning_rate = outer_learning_rate|there is no outer rate
+        # self.num_outer_steps = num_outer_steps
         self.num_inner_steps = num_inner_steps
-        self.num_outer_steps = num_outer_steps
 
         self.initialise_network(
             input_dim, num_layers, num_hidden_units, hidden_activation,
@@ -151,7 +152,7 @@ class ReptileRegressor(NeuralRegressor):
 
     def initialise_global_reduce_ops(self,):
         """
-        NB this method depends on attributes defined in
+        NB these meta-learning specific method depends on attributes defined in
         `self.initialise_global_ops()`, so that method must be run first.
         
         The Operations defined in this method refer to reducing operations
@@ -185,10 +186,10 @@ class ReptileRegressor(NeuralRegressor):
             feed_dict={
                 placeholder: [
                     params[val_index] for params in params_list
-                ] for (placeholder, val_index) in zip(
-                    # CAN DO THIS WITH `ENUM()`
-                    self.parameter_placeholder_list,
-                    range(len(self.parameter_placeholder_list))
+                ] for (val_index, placeholder) in enumerate(
+                    # CAN DO THIS WITH `ENUM()`:
+                    self.parameter_placeholder_list
+                    # range(len(self.parameter_placeholder_list))
                 )
             }
         )

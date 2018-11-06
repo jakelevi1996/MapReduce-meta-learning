@@ -4,8 +4,8 @@ import matplotlib.pyplot as plt
 DEFAULT_FILENAME = "Code/data/sinusoid_metadataset.npz"
 DEFAULT_IMAGE_NAME = "Code/data/sample_data"
 
-def random_x(x_lim=[0, 1], num_tasks=1, num_points=50):
-    return np.random.uniform(*x_lim, size=(num_tasks, num_points))
+def random_x(x_lim=[0, 1], num_tasks=1, num_points=50, xdim=1):
+    return np.random.uniform(*x_lim, size=(num_tasks, num_points, xdim))
 
 def deterministic_sinusoid_set(X, phase=0, amplitude=1, freq=1):
     """
@@ -25,11 +25,11 @@ def random_sinusoid_set(
     amplitude_lim=[0.5, 2], freq_lim=[0.5, 3],
 ):
     # Generate random task-specific phase:
-    phase = np.random.uniform(*phase_lim, (num_tasks, 1))
+    phase = np.random.uniform(*phase_lim, (num_tasks, 1, 1))
     # Generate random task-specific amplitude:
-    amplitude = np.random.uniform(*amplitude_lim, (num_tasks, 1))
+    amplitude = np.random.uniform(*amplitude_lim, (num_tasks, 1, 1))
     # Generate random task-specific frequency:
-    freq = np.random.uniform(*freq_lim, (num_tasks, 1))
+    freq = np.random.uniform(*freq_lim, (num_tasks, 1, 1))
 
     X = random_x(x_lim, num_tasks, num_points)
     Y = deterministic_sinusoid_set(X, phase, amplitude, freq)

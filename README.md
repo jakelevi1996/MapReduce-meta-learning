@@ -23,7 +23,7 @@ The file-structure of this repository is described by the list below (including 
     - `preprocessing.py`: module for preprocessing datasets, EG MNIST
     - Data files for training and evaluation, in the `.npz` file format for storing multiple `Numpy` arrays, which can be loaded using the `tasksets` module
   - **models** folder:
-    - `neuralmodels.py`: module containing a class for a generic neural network, a class for a reptile meta-learning model as a sub-class, including `inner_update` and `outer_update` methods, and a class for a hrn model
+    - `neuralmodels.py`: module containing a class for a generic neural network, a class for a reptile meta-learning model as a sub-class, including `adapt` and `meta_update` methods, and a class for a hrn model
     - Folders containing saved models, saved using [`tf.train.Saver.save()`](https://www.tensorflow.org/api_docs/python/tf/train/Saver#save)
   - **results** folder:
     - [Tensorboard](https://www.tensorflow.org/guide/summaries_and_tensorboard)-files saved using [`tf.summary.FileWriter.add_summary()`](https://www.tensorflow.org/api_docs/python/tf/summary/FileWriter#add_summary)
@@ -40,3 +40,6 @@ The file-structure of this repository is described by the list below (including 
 - Investigate metatest extrapolation properties
 - In `generate`, use `tf.data` API
 - Add package structure to make imports work properly
+- Add image plotting to sinusoid training, both before and after fast adaptation, using the `main` and `inference` modules
+- Implement HRN training on MNIST
+- Investigate using variance in VMP updates (isotropic at first, then diagonal; should first make notes on sequential Bayesian inference/VMP for Gaussian RVs)
