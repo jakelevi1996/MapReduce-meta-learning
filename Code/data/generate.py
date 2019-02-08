@@ -40,6 +40,9 @@ def random_sinusoid_set(
 def generate_sinusoid_metaset_grid():
     pass
 
+def generate_mnist_metaset():
+    pass
+
 def plot_data(x, y, filename=DEFAULT_IMAGE_NAME, format_str='bx'):
     plt.figure()
     plt.plot(x, y, format_str)
