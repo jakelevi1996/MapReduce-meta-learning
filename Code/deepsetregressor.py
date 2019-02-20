@@ -46,17 +46,14 @@ def split_image(image, train_ratio=0.9, threshold=0.5, num_x0=28, num_x1=28):
 
     return x_dark_train, x_light_train, x_test, y_test
 
-# image = np.arange(15).reshape(3, 5) / 15
-# print(image)
-# print(split_image(image, num_x0=3, num_x1=5, train_ratio=0.5))
-
 
 
 # Define constants
 num_hidden_units = 250
 learning_rate = 1e-3
 num_epochs = 10000
-num_images = 300
+num_images = 2000
+print_every = 20
 logdir = "results/summaries"
 hidden_activation = tf.nn.relu
 # hidden_activation = tf.tanh
@@ -64,14 +61,17 @@ hidden_activation = tf.nn.relu
 
 print("Loading images...")
 images = load_raw_mnist()[0][:num_images]
+np.random.shuffle(images)
 
-print(images[0])
-
-"""
 # Initialise computational graph...
 print("Initialising computational graph...")
+# Input placeholders
+dark_inputs = tf.placeholder(dtype=tf.float32, shape=[None, 2])
+light_inputs = tf.placeholder(dtype=tf.float32, shape=[None, 2])
+test_pixel_x = tf.placeholder(dtype=tf.float32, shape=[None, 2])
+test_pixel_y = tf.placeholder(dtype=tf.float32, shape=[None, 1])
+tile_shape = [tf.shape(test_pixel_x)[0], 1]
 # Network for dark pixels
-dark_inputs = tf.placeholder(dtype=tf.float32, shape=(None,2))
 darknet_hidden_1 = tf.layers.dense(
     inputs=dark_inputs, units=num_hidden_units,
     activation=hidden_activation, name="darknet_hidden_1"
@@ -80,9 +80,11 @@ darknet_hidden_2 = tf.layers.dense(
     inputs=darknet_hidden_1, units=num_hidden_units,
     activation=hidden_activation, name="darknet_hidden_2"
 )
-darknet_out = tf.reduce_mean(darknet_hidden_2, axis=0, name="darknet_out")
+darknet_out = tf.reduce_mean(
+    darknet_hidden_2, axis=0, name="darknet_out", keepdims=True
+)
+darknet_tiled = tf.tile(darknet_out, tile_shape, name="darknet_tiled")
 # Network for light pixels (should call a function shared with dark pixels):
-light_inputs = tf.placeholder(dtype=tf.float32, shape=(None,2))
 lightnet_hidden_1 = tf.layers.dense(
     inputs=light_inputs, units=num_hidden_units,
     activation=hidden_activation, name="lightnet_hidden_1"
@@ -91,16 +93,18 @@ lightnet_hidden_2 = tf.layers.dense(
     inputs=lightnet_hidden_1, units=num_hidden_units,
     activation=hidden_activation, name="lightnet_hidden_2"
 )
-lightnet_out = tf.reduce_mean(lightnet_hidden_2, axis=0, name="lightnet_out")
-# Placeholder for test pixels
-test_pixel_x = tf.placeholder(dtype=tf.float32, shape=2)
-test_pixel_y = tf.placeholder(dtype=tf.float32, shape=[1, 1])
+lightnet_out = tf.reduce_mean(
+    lightnet_hidden_2, axis=0, name="lightnet_out", keepdims=True
+)
+lightnet_tiled = tf.tile(lightnet_out, tile_shape, name="lightnet_tiled")
 # Concatenate vectors
-concat_vector = tf.concat([darknet_out, lightnet_out, test_pixel_x], axis=0)
+concat_vector = tf.concat(
+    [darknet_tiled, lightnet_tiled, test_pixel_x], axis=1, name="concat_vector"
+)
 # Dense layers for deep-set regressor
 deepset_hidden = tf.layers.dense(
-    inputs=tf.reshape(concat_vector, [1, -1]), units=num_hidden_units,
-    activation=hidden_activation, name="deepset_hidden"
+    inputs=concat_vector, units=num_hidden_units, activation=hidden_activation,
+    name="deepset_hidden"
 )
 deepset_logits = tf.layers.dense(
     inputs=deepset_hidden, units=1,
@@ -119,25 +123,6 @@ init_op = tf.global_variables_initializer()
 # Create summaries, for visualising in Tensorboard
 summary_op = tf.summary.scalar("Loss", loss_op)
 
-# Machinary for accumulated gradients, starting with a list of trainable vars:
-tvs = tf.trainable_variables()
-# List of variables initialised to zeros in the shape of each trainable
-# variable, which will be used to accumulate gradients:
-accum_vars = [tf.Variable(
-    # Couldn't tv.initialized_value() be replaced with tv.shape (or similar?)
-    initial_value=tf.zeros_like(tv.initialized_value()), trainable=False
-) for tv in tvs]
-# List of ops for resetting accumulated gradients to zero (again, tf.zeros(tv.shape))
-zero_ops = [tv.assign(tf.zeros_like(tv)) for tv in accum_vars]
-# Op to compute gradient
-gvs = optimiser.compute_gradients(loss_op, tvs)
-# Op to accumulate gradient
-accum_ops = [accum_vars[i].assign_add(gv[0]) for i, gv in enumerate(gvs)]
-# Op to apply gradient
-train_step = optimiser.apply_gradients([
-    (accum_vars[i], gv[1]) for i, gv in enumerate(gvs)
-])
-
 
 # Train and save the model
 print("Starting TensorFlow Session...")
@@ -148,34 +133,22 @@ with tf.Session() as sess:
     # Iterate through each training image:
     t_start = time()
     for i, image in enumerate(images):
-        sess.run(zero_ops)
-        x_dark_train, x_light_train, x_test, y_test = split_image(image)
-        # Iterate through pixels:
-        # Need to split image up into training and test pixels, and threshold!!
-        for x, y in zip(x_test, y_test):
-            # Run the graph, summaries and training op
-            loss_val, summary_val, _ = sess.run(
-                # (loss_op, summary_op, train_op), feed_dict={
-                (loss_op, summary_op, accum_ops), feed_dict={
-                    dark_inputs: x_dark_train,
-                    light_inputs: x_light_train,
-                    test_pixel_x: x,
-                    test_pixel_y: np.array(y).reshape(1, 1),
-                }
-            )
-            # Add summary to Tensorboard
+        # sess.run(zero_ops)
+        x_dark_train, x_light_train, x_test, y_test = split_image(image, 0.9)
+        # Run the graph, summaries and training op
+        loss_val, summary_val, _ = sess.run(
+            (loss_op, summary_op, train_op), feed_dict={
+                dark_inputs: x_dark_train,
+                light_inputs: x_light_train,
+                test_pixel_x: x_test,
+                test_pixel_y: y_test.reshape(-1, 1),
+            }
+        )
+        # Add summary to Tensorboard
+        if i % print_every == 0:
             writer.add_summary(summary_val, i)
             print(i, loss_val)
-        sess.run(train_step)
+        # sess.run(train_step)
 
 
 print("\n\nTime taken = {:.5} s".format(time() - t_start))
-
-
-TODO:
-- Relu
-- Accumulate gradients
-- batch norm
-- gpu
-- simpler data set? 
-"""
