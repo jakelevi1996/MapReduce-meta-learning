@@ -1,5 +1,7 @@
 import numpy as np
 import tensorflow as tf
+import matplotlib as mpl
+mpl.use('Agg')
 import matplotlib.pyplot as plt
 from data.preprocessing import load_raw_mnist
 from time import time
