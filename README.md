@@ -19,7 +19,7 @@ The file-structure of this repository is described by the list below (including 
   - **data** folder:
     - `generate.py`: module for generating different types of synthetic data, EG for sinusoidal regression, regression on other types of signals, shape classification (both "What is inside/outside the shape" and "What kind of shape is this")
     module with functions for hard coded classification-rules for synthetic data, generating synthetic data, and loading synthetic data
-    - `tasksets.py`: module containing class descriptions of TaskSet and DataSet objects, and methods for creating, saving and loading them
+    - `tasksets.py`: module containing class descriptions of `MetaSet`, `TaskSet`, `Task`, and `DataSet` objects, and methods for creating, saving and loading them
     - `preprocessing.py`: module for preprocessing datasets, EG MNIST
     - Data files for training and evaluation, in the `.npz` file format for storing multiple `Numpy` arrays, which can be loaded using the `tasksets` module
   - **models** folder:
@@ -43,3 +43,4 @@ The file-structure of this repository is described by the list below (including 
 - Add image plotting to sinusoid training, both before and after fast adaptation, using the `main` and `inference` modules
 - Implement HRN training on MNIST
 - Investigate using variance in VMP updates (isotropic at first, then diagonal; should first make notes on sequential Bayesian inference/VMP for Gaussian RVs)
+- In `data.tasksets.MetaSet.load`, add option to only load a subset of tasks

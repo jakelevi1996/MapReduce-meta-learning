@@ -4,4 +4,12 @@
 # Ignore npz data files:
 **.npz
 
+# Ignore compiled Python
+**.pyc
+
 temp.py
+mini_reptile.py
+config.py
+**.gz
+**.tfevents.**
+**vscode**
