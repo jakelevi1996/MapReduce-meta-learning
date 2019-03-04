@@ -329,7 +329,7 @@ class ContinuousSetRegressor():
     def __init__(
         self, num_hidden_units=250, hidden_activation=tf.nn.relu,
         num_hidden_layers_pre_reduce=2, num_hidden_layers_post_reduce=4,
-        learning_rate=1e-3
+        learning_rate=1e-3, loss_func=tf.losses.mean_squared_error
     ):
         # Input placeholders
         self.x_condition = tf.placeholder(tf.float32, shape=[None, None, 2])
@@ -377,11 +377,8 @@ class ContinuousSetRegressor():
         # Maybe should use linear output and MSE?
         self.output = tf.sigmoid(logits, name="output")
 
-
-        # self.loss_op = tf.losses.sigmoid_cross_entropy(
-        self.loss_op = tf.losses.mean_squared_error(
-            self.y_eval, logits
-        )
+        # Define loss, training and initialisation operations
+        self.loss_op = loss_func(self.y_eval, logits )
         self.train_op = tf.train.AdamOptimizer(learning_rate).minimize(
             self.loss_op
         )
