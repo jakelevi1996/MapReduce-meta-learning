@@ -5,56 +5,42 @@ mpl.use('Agg')
 import matplotlib.pyplot as plt
 from time import time
 
-from models.neuralmodels import BinarySetRegressor
-from data.preprocessing import load_raw_mnist, split_image, split_image_batch
+from models.neuralmodels import BinarySetRegressor, ContinuousSetRegressor
+from data.preprocessing import (
+    load_raw_mnist, split_binary_image, split_binary_image_batch,
+    split_continuous_image, split_continuous_image_batch
+)
 
 def plot_preds(
-    test_image, x_dark_train, x_light_train, Y_pred, filename="test"
+    test_image, Y_pred, x_dark_train=None, x_light_train=None,
+    x_condition=None, filename="test"
 ):
     # Create figure and axes for subplots
     fig, axes = plt.subplots(1, 2)
     fig.set_size_inches(16, 9)
     # Plot input image and conditioning points
     if test_image.ndim == 1: test_image = test_image.reshape(28, 28)
-    axes[0].imshow(test_image, extent=[-1, 1, -1, 1])
-    axes[0].plot(x_dark_train[:, 0], -x_dark_train[:, 1], "k+")
-    axes[0].plot(x_light_train[:, 0], -x_light_train[:, 1], "w+")
+    e = 1 + 1/28
+    axes[0].imshow(test_image, extent=[-e, e, -e, e])
+    if x_dark_train is not None:
+        axes[0].plot(x_dark_train[:, 0], -x_dark_train[:, 1], "k+")
+    if x_light_train is not None:
+        axes[0].plot(x_light_train[:, 0], -x_light_train[:, 1], "w+")
+    if x_condition is not None:
+        axes[0].plot(x_condition[:, 0], -x_condition[:, 1], "k+")
     # Plot network output based on conditioning points
-    axes[1].imshow(Y_pred, extent=[-1, 1, -1, 1])
+    axes[1].imshow(Y_pred, extent=[-e, e, -e, e])
     # Save figure
     print("Saving figure...")
     plt.savefig(filename)
     plt.close()
 
 
-# Define constants
-num_hidden_units = 250
-learning_rate = 1e-3
-num_epochs = 10
-# num_images = 2
-batch_size = 100
-print_every = 10
-plot_every = 1000
-# plot_every = 1
-# train_ratio = 0.9
-logdir = "results/summaries"
-hidden_activation = tf.nn.relu
-# hidden_activation = tf.tanh
-
-print("Loading images...")
-images = load_raw_mnist()[0]
-# images = load_raw_mnist()[0][1:3]
-np.random.shuffle(images)
-image_batches = np.array_split(
-    images, range(batch_size, images.shape[0], batch_size)
-)
-
-
-# Initialise computational graph...
-print("Initialising computational graph...")
-bsr = BinarySetRegressor()
-
-def train_bsr(train_ratio=0.9, num_epochs=1, plot_every=10000):
+def train_bsr(
+    bsr, image_batches, train_ratio=0.9, num_epochs=10, print_every=100,
+    plot_every=1000, logdir="results/summaries"
+):
+    next_print, next_plot = 0, 0
 
     # Train and save the model
     print("Starting TensorFlow Session...")
@@ -65,28 +51,30 @@ def train_bsr(train_ratio=0.9, num_epochs=1, plot_every=10000):
         # Iterate through each training image:
         t_start, num_images_seen = time(), 0
         for e in range(num_epochs):
-            for i, image_batch in enumerate(image_batches):
+            for image_batch in image_batches:
                 (
                     x_dark_train, x_light_train, x_test, y_test
-                ) = split_image_batch(image_batch, train_ratio)
+                ) = split_binary_image_batch(image_batch, train_ratio)
                 loss_val, summary_val = bsr.training_step(
                     sess, x_dark_train, x_light_train, x_test, y_test
                 )
-                num_images_seen += batch_size
+                num_images_seen += image_batch.shape[0]
+                
                 # Add summary to Tensorboard
                 if num_images_seen % print_every == 0:
                     writer.add_summary(summary_val, num_images_seen)
-                    # print("E = {}, NIS = {}, loss = {:.5}.png".format(
-                    #     e, num_images_seen, loss_val
-                    # ))
+                    print("E = {}, NIS = {}, loss = {:.5}.png".format(
+                        e, num_images_seen, loss_val
+                    ))
+                    next_print += print_every
                 
                 # Plot predictions
-                if num_images_seen % plot_every == 0:
+                if num_images_seen >= next_plot:
                     # Choose a random image
                     image_ind = np.random.choice(images.shape[0])
                     image = images[image_ind]
                     # Split image
-                    x_dark_train, x_light_train, x_test, y_test = split_image(
+                    x_dark_train, x_light_train, _, _ = split_binary_image(
                         image, train_ratio
                     )
                     # Generate points to evaluate
@@ -101,12 +89,98 @@ def train_bsr(train_ratio=0.9, num_epochs=1, plot_every=10000):
                     filename = "results/images/Seen {}, TR = {}.png".format(
                         num_images_seen, train_ratio
                     )
-                    plot_preds(image, x_dark_train, x_light_train, Y, filename)
-
+                    plot_preds(
+                        image, Y, x_dark_train, x_light_train,
+                        filename=filename
+                    )
+                    next_plot += plot_every
 
 
     print("\n\nTime taken = {:.5} s".format(time() - t_start))
     print("Train ratio = {}, final loss = {:.5}".format(train_ratio, loss_val))
 
-for train_ratio in np.arange(0.5, 1, 0.1):
-    train_bsr(train_ratio)
+def train_csr(
+    csr, image_batches, train_ratio=0.9, num_epochs=10, print_every=100,
+    plot_every=1000, logdir="results/summaries"
+):
+    next_print, next_plot = 0, 0
+
+    # Train and save the model
+    print("Starting TensorFlow Session...")
+    with tf.Session() as sess:
+        writer = tf.summary.FileWriter(logdir, sess.graph)
+        # Initialise variables
+        csr.initialise_variables(sess)
+        # Iterate through each training image:
+        t_start, num_images_seen = time(), 0
+        for e in range(num_epochs):
+            for image_batch in image_batches:
+                (
+                    x_condition, y_condition, x_eval, y_eval
+                ) = split_continuous_image_batch(image_batch, train_ratio)
+
+                loss_val, summary_val = csr.training_step(
+                    sess, x_condition, y_condition, x_eval, y_eval
+                )
+                num_images_seen += image_batch.shape[0]
+                
+                # Add summary to Tensorboard
+                if num_images_seen >= next_print:
+                    writer.add_summary(summary_val, num_images_seen)
+                    print("E = {}, NIS = {}, loss = {:.5}.png".format(
+                        e, num_images_seen, loss_val
+                    ))
+                    next_print += print_every
+                
+                # Plot predictions
+                if num_images_seen >= next_plot:
+                    # Choose a random image
+                    image_ind = np.random.choice(images.shape[0])
+                    image = images[image_ind]
+                    # Split image
+                    x_condition, y_condition, _, _ = split_continuous_image(
+                        image, train_ratio
+                    )
+                    # Generate points to evaluate
+                    x0, x1 = np.linspace(-1, 1, 100), np.linspace(-1, 1, 100)
+                    X0, X1 = np.meshgrid(x0, x1)
+                    mesh_shape = X0.shape
+                    X = np.stack([X0.ravel(), X1.ravel()], axis=1)
+                    Y = csr.eval(
+                        sess, x_condition, y_condition, X, mesh_shape
+                    )
+                    # Plot
+                    filename = "results/images/Seen {}, TR = {}.png".format(
+                        num_images_seen, train_ratio
+                    )
+                    plot_preds(
+                        image, Y, x_condition=x_condition, filename=filename
+                    )
+                    next_plot += plot_every
+
+    print("\n\nTime taken = {:.5} s".format(time() - t_start))
+    print("Train ratio = {}, final loss = {:.5}".format(train_ratio, loss_val))
+
+
+if __name__ == "__main__":
+    # Define constants
+    # num_hidden_units = 250
+    # learning_rate = 1e-3
+    # hidden_activation = tf.tanh
+
+    print("Loading images...")
+    images = load_raw_mnist()[0]
+    # images = load_raw_mnist()[0][1:3]
+    np.random.shuffle(images)
+    batch_size = 100
+    split_inds = range(batch_size, images.shape[0], batch_size)
+    image_batches = np.array_split(images, split_inds)
+
+
+    # Initialise computational graph...
+    print("Initialising computational graph...")
+    # bsr = BinarySetRegressor()
+    csr = ContinuousSetRegressor()
+    for train_ratio in np.arange(0.1, 1, 0.1):
+        # train_bsr(train_ratio)
+        train_csr(csr, image_batches, train_ratio   )

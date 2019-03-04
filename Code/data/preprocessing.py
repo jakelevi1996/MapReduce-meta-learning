@@ -26,7 +26,9 @@ def load_raw_mnist(filename=DEFAULT_RAW_MNIST_FILENAME):
     
     return train_data, train_labels, eval_data, eval_labels
 
-def split_image(image, train_ratio=0.9, threshold=0.5, num_x0=28, num_x1=28):
+def split_binary_image(
+    image, train_ratio=0.9, threshold=0.5, num_x0=28, num_x1=28
+):
     assert num_x0 * num_x1 == image.size
     assert 0 < train_ratio < 1
     assert 0 < threshold < 1
@@ -69,14 +71,14 @@ def split_image(image, train_ratio=0.9, threshold=0.5, num_x0=28, num_x1=28):
 
     return x_dark_train, x_light_train, x_test, y_test
 
-def split_image_batch(
+def split_binary_image_batch(
     image_batch, train_ratio=0.9, threshold=0.5, num_x0=28, num_x1=28
 ):
     x_dark_train_batch, x_light_train_batch = [], []
     x_test_batch, y_test_batch = [], []
     # Split each image separately (could vectorise?)
     for image in image_batch:
-        x_dark_train, x_light_train, x_test, y_test = split_image(
+        x_dark_train, x_light_train, x_test, y_test = split_binary_image(
             image, train_ratio, threshold, num_x0, num_x1
         )
         x_dark_train_batch.append(x_dark_train)
@@ -107,6 +109,53 @@ def split_image_batch(
     
     return x_dark_train_batch, x_light_train_batch, x_test_batch, y_test_batch
 
+def split_continuous_image(image, train_ratio=0.9, num_x0=28, num_x1=28):
+    assert num_x0 * num_x1 == image.size
+    assert 0 < train_ratio < 1
+    # Convert matrix to grid of input locations:
+    x0, x1 = np.linspace(-1, 1, num_x0), np.linspace(-1, 1, num_x1)
+    X0, X1 = np.meshgrid(x0, x1)
+    X = np.stack([X0.ravel(), X1.ravel()], axis=1)
+    Y = image.reshape([-1, 1])
+    
+    # Separate conditioning and evaluation points
+    n_points = Y.size
+    n_condition = int(train_ratio * n_points)
+
+    condition_inds = np.random.choice(n_points, n_condition, replace=False)
+    x_condition = X[condition_inds]
+    y_condition = Y[condition_inds]
+
+    eval_inds = np.delete(np.arange(n_points), condition_inds)
+    np.random.shuffle(eval_inds)
+    x_eval = X[eval_inds]
+    y_eval = Y[eval_inds]
+
+    return x_condition, y_condition, x_eval, y_eval
+
+def split_continuous_image_batch(
+    image_batch, train_ratio=0.9, num_x0=28, num_x1=28
+):
+    x_condition_batch, y_condition_batch = [], []
+    x_eval_batch, y_eval_batch = [], []
+    # Split each image separately (could vectorise?)
+    for image in image_batch:
+        x_condition, y_condition, x_eval, y_eval = split_continuous_image(
+            image, train_ratio, num_x0, num_x1
+        )
+        x_condition_batch.append(x_condition)
+        y_condition_batch.append(y_condition)
+        x_eval_batch.append(x_eval)
+        y_eval_batch.append(y_eval)
+    
+    # Stack truncated arrays into 3D tensors
+    x_condition_batch = np.stack(x_condition_batch)
+    y_condition_batch = np.stack(y_condition_batch)
+    x_eval_batch = np.stack(x_eval_batch)
+    y_eval_batch = np.stack(y_eval_batch)
+    
+    return x_condition_batch, y_condition_batch, x_eval_batch, y_eval_batch
+
 
 def raw_to_spatial_mnist(data, num_images=1, num_x0=28, num_x1=28):
     assert num_x0 * num_x1 == data.shape[1]
@@ -131,13 +180,20 @@ def spatial_image_to_matrices(x, y, num_x0=28, num_x1=28):
 
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    # save_raw_mnist()
-    i = 80
-    train_data, train_labels, eval_data, eval_labels = load_raw_mnist()
-    print(train_data.shape)
-    plt.pcolor(np.flip(train_data[i].reshape(28,28), axis=0))
-    plt.show()
-    X, Y = raw_to_spatial_mnist(train_data)
-    plt.pcolor(*spatial_image_to_matrices(X[i], Y[i]))
-    plt.show()
+    # logging.basicConfig(level=logging.INFO)
+    # # save_raw_mnist()
+    # i = 80
+    # train_data, train_labels, eval_data, eval_labels = load_raw_mnist()
+    # print(train_data.shape)
+    # plt.pcolor(np.flip(train_data[i].reshape(28,28), axis=0))
+    # plt.show()
+    # X, Y = raw_to_spatial_mnist(train_data)
+    # plt.pcolor(*spatial_image_to_matrices(X[i], Y[i]))
+    # plt.show()
+
+    batch_size = 3
+    nx0 = 4
+    nx1 = 5
+    images = np.arange(batch_size*nx0*nx1).reshape(batch_size, nx0, nx1) + 100
+    print(images)
+    for i in split_continuous_image_batch(images, 0.5, nx0, nx1): print(i, "\n")

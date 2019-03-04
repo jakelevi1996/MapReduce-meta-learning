@@ -231,18 +231,10 @@ class BinarySetRegressor():
         learning_rate=1e-3
     ):
         # Input placeholders
-        self.dark_inputs = tf.placeholder(
-            dtype=tf.float32, shape=[None, None, 2]
-        )
-        self.light_inputs = tf.placeholder(
-            dtype=tf.float32, shape=[None, None, 2]
-        )
-        self.test_pixels_x = tf.placeholder(
-            dtype=tf.float32, shape=[None, None, 2]
-        )
-        self.test_pixels_y = tf.placeholder(
-            dtype=tf.float32, shape=[None, None, 1]
-        )
+        self.dark_inputs = tf.placeholder(tf.float32, shape=[None, None, 2])
+        self.light_inputs = tf.placeholder(tf.float32, shape=[None, None, 2])
+        self.test_pixels_x = tf.placeholder(tf.float32, shape=[None, None, 2])
+        self.test_pixels_y = tf.placeholder(tf.float32, shape=[None, None, 1])
         num_test_pixels = tf.shape(self.test_pixels_x)[1]
         # Network for dark pixels
         darknet_out = self.pre_reduce_layers(
@@ -331,4 +323,93 @@ class BinarySetRegressor():
             self.dark_inputs: x_dark_train.reshape(num_batches, -1, 2),
             self.light_inputs: x_light_train.reshape(num_batches, -1, 2),
             self.test_pixels_x: x_test.reshape(num_batches, -1, 2),
+        }).reshape(output_shape)
+
+class ContinuousSetRegressor():
+    def __init__(
+        self, num_hidden_units=250, hidden_activation=tf.nn.relu,
+        num_hidden_layers_pre_reduce=2, num_hidden_layers_post_reduce=4,
+        learning_rate=1e-3
+    ):
+        # Input placeholders
+        self.x_condition = tf.placeholder(tf.float32, shape=[None, None, 2])
+        self.y_condition = tf.placeholder(tf.float32, shape=[None, None, 1])
+        self.x_eval = tf.placeholder(tf.float32, shape=[None, None, 2])
+        self.y_eval = tf.placeholder(tf.float32, shape=[None, None, 1])
+        num_eval_points = tf.shape(self.x_eval)[1]
+        # Concatenate conditioning points
+        conditioning_set = tf.concat(
+            [self.x_condition, self.y_condition], axis=2, name="condition_set"
+        )
+        # Dense layers before reduction
+        pre_reduce_hidden_layers = [tf.layers.dense(
+            inputs=conditioning_set, units=num_hidden_units,
+            activation=hidden_activation, name="pre_reduce_1"
+        )]
+        for i in range(1, num_hidden_layers_pre_reduce):
+            pre_reduce_hidden_layers.append(tf.layers.dense(
+                inputs=pre_reduce_hidden_layers[-1], units=num_hidden_units,
+                activation=hidden_activation, name="pre_reduce_"+str(i+1)
+            ))
+        # Reduce, tile and concatenate
+        reduce_op = tf.reduce_mean(
+            pre_reduce_hidden_layers[-1], axis=1, keepdims=True, name="reduce"
+        )
+        tile_op = tf.tile(
+            reduce_op, [1, num_eval_points, 1], name="tile"
+        )
+        concat_op = tf.concat(
+            [tile_op, self.x_eval], axis=2, name="concatenate"
+        )
+        # Dense layers for output from reduce operations to final output
+        post_reduce_hidden_layers = [tf.layers.dense(
+            inputs=concat_op, units=num_hidden_units,
+            activation=hidden_activation, name="post_reduce_1"
+        )]
+        for i in range(1, num_hidden_layers_post_reduce - 1):
+            post_reduce_hidden_layers.append(tf.layers.dense(
+                inputs=post_reduce_hidden_layers[-1], units=num_hidden_units,
+                activation=hidden_activation, name="post_reduce_"+str(i+1)
+            ))
+        logits = tf.layers.dense(
+            inputs=post_reduce_hidden_layers[-1], units=1, name="logits"
+        )
+        # Maybe should use linear output and MSE?
+        self.output = tf.sigmoid(logits, name="output")
+
+
+        # self.loss_op = tf.losses.sigmoid_cross_entropy(
+        self.loss_op = tf.losses.mean_squared_error(
+            self.y_eval, logits
+        )
+        self.train_op = tf.train.AdamOptimizer(learning_rate).minimize(
+            self.loss_op
+        )
+
+        self.init_op = tf.global_variables_initializer()
+
+        # Create summaries, for visualising in Tensorboard
+        self.summary_op = tf.summary.scalar("Loss", self.loss_op)
+    
+    def initialise_variables(self, sess): sess.run(self.init_op)
+    
+    def training_step(self, sess, x_condition, y_condition, x_eval, y_eval):
+        loss_val, summary_val, _ = sess.run(
+            (self.loss_op, self.summary_op, self.train_op), feed_dict={
+                self.x_condition: x_condition,
+                self.y_condition: y_condition,
+                self.x_eval: x_eval,
+                self.y_eval: y_eval,
+            }
+        )
+        return loss_val, summary_val
+    
+    def eval(
+        self, sess, x_condition, y_condition, x_eval, output_shape=-1,
+        num_batches=1
+    ):
+        return sess.run(self.output, feed_dict={
+            self.x_condition: x_condition.reshape(num_batches, -1, 2),
+            self.y_condition: y_condition.reshape(num_batches, -1, 1),
+            self.x_eval: x_eval.reshape(num_batches, -1, 2),
         }).reshape(output_shape)
