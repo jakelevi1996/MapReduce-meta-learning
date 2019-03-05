@@ -83,8 +83,8 @@ def train_bsr(
     print("Train ratio = {}, final loss = {:.5}".format(train_ratio, loss_val))
 
 def train_csr(
-    csr, image_batches, train_ratio=0.9, num_epochs=10, print_every=100,
-    num_plots=20, model_name="csr", noise_prob=0, max_eval_points=75
+    csr, image_batches, train_ratio=0.9, num_epochs=10, print_every=1000,
+    num_plots=30, model_name="csr", noise_prob=0, max_eval_points=75
 ):
     # Create directory for tensorboard logging
     logdir = "results/summaries/" + model_name
@@ -159,13 +159,37 @@ def train_csr(
     print("Train ratio = {}, final loss = {:.5}".format(train_ratio, loss_val))
     return loss_val
 
-def sweep_train_ratio(): pass
+def sweep_train_ratio():
+    train_ratio_list = np.arange(0.1, 1, 0.1)
+    loss_list = []
+
+    # Initialise computational graph
+    print("Initialising computational graph...")
+    csr = ContinuousSetRegressor()
+    for train_ratio in train_ratio_list:
+        model_name = "CSR, TR = {:.4}".format(train_ratio)
+        loss = train_csr(
+            csr, image_batches, train_ratio=train_ratio, model_name=model_name,
+        )
+        loss_list.append(loss)
+    
+    print(train_ratio_list, loss_list)
+    plot_results(
+        train_ratio_list, loss_list, "Train ratio",
+        title="Final loss vs train ratio (max 75 eval points)",
+        filename="results/sweep_train_ratio"
+    )
+    np.savetxt(
+        "results/sweep_train_ratio.txt",
+        [train_ratio_list, loss_list], fmt="%10.5g"
+    )
+    tf.reset_default_graph()
+
 
 def sweep_noise_prob():
     noise_prob_list = np.arange(0.0, 0.40, 0.05)
     loss_list = []
 
-    # Initialise computational graph
     print("Initialising computational graph...")
     csr = ContinuousSetRegressor()
     for noise_prob in noise_prob_list:
@@ -185,31 +209,30 @@ def sweep_noise_prob():
         "results/sweep_noise_prob.txt",
         [noise_prob_list, loss_list], fmt="%10.5g"
     )
+    tf.reset_default_graph()
+
+
+def train_l1():
+    print("Initialising computational graph...")
+    csr = ContinuousSetRegressor(loss_func=tf.losses.absolute_difference)
+    model_name = "CSR, L1 loss"
+    train_csr(csr, image_batches, model_name=model_name)
+    tf.reset_default_graph()
 
 
 if __name__ == "__main__":
 
     print("Loading images...")
-    # images = load_raw_mnist()[0]
-    images = load_raw_mnist()[0][1:3]
+    images = load_raw_mnist()[0]
+    # images = load_raw_mnist()[0][1:3]
     np.random.shuffle(images)
     batch_size = 100
     split_inds = range(batch_size, images.shape[0], batch_size)
     image_batches = np.array_split(images, split_inds)
 
-
-    # # Initialise computational graph...
-    # print("Initialising computational graph...")
-    # # bsr = BinarySetRegressor()
-    # csr = ContinuousSetRegressor()
-    # # csr = ContinuousSetRegressor(loss_func=tf.losses.absolute_difference)
-    # # for train_ratio in np.arange(0.1, 1, 0.1):
-    # #     # train_bsr(train_ratio)
-    # #     train_csr(csr, image_batches, train_ratio   )
-    
+    # bsr = BinarySetRegressor()
     # train_csr(csr, image_batches, num_epochs=500, noise_prob=0.2)
-    # # x = 0
-    # # y = np.arange(20).reshape(2, 2, 5)
-    # # print(add_noise(y, 0.5)[0])
 
+    sweep_train_ratio()
     sweep_noise_prob()
+    train_l1()
