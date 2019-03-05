@@ -11,5 +11,6 @@ temp.py
 mini_reptile.py
 config.py
 **.gz
+**.txt
 **.tfevents.**
 **vscode**

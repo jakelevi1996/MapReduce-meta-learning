@@ -109,7 +109,9 @@ def split_binary_image_batch(
     
     return x_dark_train_batch, x_light_train_batch, x_test_batch, y_test_batch
 
-def split_continuous_image(image, train_ratio=0.9, num_x0=28, num_x1=28):
+def split_continuous_image(
+    image, train_ratio=0.9, num_x0=28, num_x1=28, max_eval_points=75
+):
     assert num_x0 * num_x1 == image.size
     assert 0 < train_ratio < 1
     # Convert matrix to grid of input locations:
@@ -130,18 +132,20 @@ def split_continuous_image(image, train_ratio=0.9, num_x0=28, num_x1=28):
     np.random.shuffle(eval_inds)
     x_eval = X[eval_inds]
     y_eval = Y[eval_inds]
+    x_eval = x_eval[:max_eval_points]
+    y_eval = y_eval[:max_eval_points]
 
     return x_condition, y_condition, x_eval, y_eval
 
 def split_continuous_image_batch(
-    image_batch, train_ratio=0.9, num_x0=28, num_x1=28
+    image_batch, train_ratio=0.9, num_x0=28, num_x1=28, max_eval_points=75
 ):
     x_condition_batch, y_condition_batch = [], []
     x_eval_batch, y_eval_batch = [], []
     # Split each image separately (could vectorise?)
     for image in image_batch:
         x_condition, y_condition, x_eval, y_eval = split_continuous_image(
-            image, train_ratio, num_x0, num_x1
+            image, train_ratio, num_x0, num_x1, max_eval_points
         )
         x_condition_batch.append(x_condition)
         y_condition_batch.append(y_condition)
