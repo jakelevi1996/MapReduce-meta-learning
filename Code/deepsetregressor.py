@@ -14,7 +14,7 @@ from data.preprocessing import (
 
 def plot_preds(
     test_image, Y_pred, x_dark_train=None, x_light_train=None,
-    x_condition=None, filename="test", verbose=False
+    x_condition=None, flip_inds=None, filename="test", verbose=False
 ):
     # Create figure and axes for subplots
     fig, axes = plt.subplots(1, 2)
@@ -29,6 +29,11 @@ def plot_preds(
         axes[0].plot(x_light_train[:, 0], -x_light_train[:, 1], "w+")
     if x_condition is not None:
         axes[0].plot(x_condition[:, 0], -x_condition[:, 1], "k+")
+    if flip_inds is not None:
+        axes[0].plot(
+            x_condition[:, 0][flip_inds.ravel()],
+            -x_condition[:, 1][flip_inds.ravel()], "r+"
+        )
     # Plot network output based on conditioning points
     axes[1].imshow(Y_pred, extent=[-e, e, -e, e])
     # Save figure
@@ -36,6 +41,10 @@ def plot_preds(
     plt.savefig(filename)
     plt.close()
 
+def add_noise(y_condition, noise_prob):
+    flip_inds = np.random.binomial(1, noise_prob, y_condition.shape) > 0
+    y_noise = np.where(flip_inds, 1.0 - y_condition, y_condition)
+    return y_noise, flip_inds
 
 def train_bsr(
     bsr, image_batches, train_ratio=0.9, num_epochs=10, print_every=100,
@@ -102,7 +111,7 @@ def train_bsr(
 
 def train_csr(
     csr, image_batches, train_ratio=0.9, num_epochs=10, print_every=100,
-    num_plots=20, model_name="csr"
+    num_plots=20, model_name="csr", noise_prob=0
 ):
 
     # Train and save the model
@@ -120,8 +129,12 @@ def train_csr(
                     x_condition, y_condition, x_eval, y_eval
                 ) = split_continuous_image_batch(image_batch, train_ratio)
 
+                if noise_prob > 0.0:
+                    y_noise, _ = add_noise(y_condition, noise_prob)
+                else: y_noise = y_condition
+
                 loss_val, summary_val = csr.training_step(
-                    sess, x_condition, y_condition, x_eval, y_eval
+                    sess, x_condition, y_noise, x_eval, y_eval
                 )
                 num_images_seen += image_batch.shape[0]
                 
@@ -144,44 +157,72 @@ def train_csr(
             x_condition, y_condition, _, _ = split_continuous_image(
                 image, train_ratio
             )
+            y_noise, flip_inds = add_noise(y_condition, noise_prob)
             # Generate points and evaluate
             x0, x1 = np.linspace(-1, 1, 100), np.linspace(-1, 1, 100)
             X0, X1 = np.meshgrid(x0, x1)
             mesh_shape = X0.shape
             X = np.stack([X0.ravel(), X1.ravel()], axis=1)
             Y = csr.eval(
-                sess, x_condition, y_condition, X, mesh_shape
+                sess, x_condition, y_noise, X, mesh_shape
             )
             # Plot
             try: mkdir("results/images/{}".format(model_name))
             except FileExistsError: pass
             filename = "results/images/{}/{}.png".format(model_name, time())
             plot_preds(
-                image, Y, x_condition=x_condition, filename=filename
+                image, Y, x_condition=x_condition, flip_inds=flip_inds,
+                filename=filename
             )
 
 
     print("\n\nTime taken = {:.5} s".format(time() - t_start))
     print("Train ratio = {}, final loss = {:.5}".format(train_ratio, loss_val))
+    return loss_val
+
+def sweep_noise_prob():
+
+    # Initialise computational graph
+    print("Initialising computational graph...")
+    noise_prob_list = np.arange(0.0, 0.30, 0.05)
+    loss_list = []
+
+    csr = ContinuousSetRegressor()
+    for noise_prob in noise_prob_list:
+        model_name = "CSR, noise prob = {:.4}".format(noise_prob)
+        loss = train_csr(
+            csr, image_batches, noise_prob=noise_prob, model_name=model_name,
+            # num_epochs=500
+        )
+        loss_list.append(loss)
+    
+    print(noise_prob_list, loss_list)
+
 
 
 if __name__ == "__main__":
 
     print("Loading images...")
-    # images = load_raw_mnist()[0]
-    images = load_raw_mnist()[0][1:3]
+    images = load_raw_mnist()[0]
+    # images = load_raw_mnist()[0][1:3]
     np.random.shuffle(images)
     batch_size = 100
     split_inds = range(batch_size, images.shape[0], batch_size)
     image_batches = np.array_split(images, split_inds)
 
 
-    # Initialise computational graph...
-    print("Initialising computational graph...")
-    # bsr = BinarySetRegressor()
-    csr = ContinuousSetRegressor(loss_func=tf.losses.absolute_difference)
-    # for train_ratio in np.arange(0.1, 1, 0.1):
-    #     # train_bsr(train_ratio)
-    #     train_csr(csr, image_batches, train_ratio   )
+    # # Initialise computational graph...
+    # print("Initialising computational graph...")
+    # # bsr = BinarySetRegressor()
+    # csr = ContinuousSetRegressor()
+    # # csr = ContinuousSetRegressor(loss_func=tf.losses.absolute_difference)
+    # # for train_ratio in np.arange(0.1, 1, 0.1):
+    # #     # train_bsr(train_ratio)
+    # #     train_csr(csr, image_batches, train_ratio   )
     
-    train_csr(csr, image_batches, num_epochs=1000)
+    # train_csr(csr, image_batches, num_epochs=500, noise_prob=0.2)
+    # # x = 0
+    # # y = np.arange(20).reshape(2, 2, 5)
+    # # print(add_noise(y, 0.5)[0])
+
+    sweep_noise_prob()
