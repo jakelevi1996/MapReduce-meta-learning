@@ -84,7 +84,8 @@ def train_bsr(
 
 def train_csr(
     csr, image_batches, train_ratio=0.9, num_epochs=10, print_every=1000,
-    num_plots=30, model_name="csr", noise_prob=0, max_eval_points=75
+    num_plots=30, model_name="csr", noise_prob=0, max_eval_points=75,
+    save_model=False
 ):
     # Create directory for tensorboard logging
     logdir = "results/summaries/" + model_name
@@ -153,6 +154,11 @@ def train_csr(
                 image, Y, x_condition=x_condition, flip_inds=flip_inds,
                 filename=filename
             )
+        if save_model:
+            folder_name = "results/saved models/" + model_name
+            while os.path.exists(folder_name): folder_name += "'"
+            os.mkdir(folder_name)
+            tf.train.Saver().save(sess, folder_name)
 
 
     print("\n\nTime taken = {:.5} s".format(time() - t_start))
@@ -231,8 +237,10 @@ if __name__ == "__main__":
     image_batches = np.array_split(images, split_inds)
 
     # bsr = BinarySetRegressor()
-    # train_csr(csr, image_batches, num_epochs=500, noise_prob=0.2)
 
-    sweep_train_ratio()
-    sweep_noise_prob()
-    train_l1()
+    # sweep_train_ratio()
+    # sweep_noise_prob()
+    # train_l1()
+    csr = ContinuousSetRegressor()
+    model_name = "CSR, MSE"
+    train_csr(csr, image_batches, model_name=model_name, save_model=True)

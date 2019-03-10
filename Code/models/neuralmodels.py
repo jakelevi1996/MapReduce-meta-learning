@@ -387,6 +387,9 @@ class ContinuousSetRegressor():
 
         # Create summaries, for visualising in Tensorboard
         self.summary_op = tf.summary.scalar("Loss", self.loss_op)
+
+        # Create saver object
+        self.saver = tf.train.Saver()
     
     def initialise_variables(self, sess): sess.run(self.init_op)
     
@@ -410,3 +413,10 @@ class ContinuousSetRegressor():
             self.y_condition: y_condition.reshape(num_batches, -1, 1),
             self.x_eval: x_eval.reshape(num_batches, -1, 2),
         }).reshape(output_shape)
+    
+    def save(self, sess, save_dir):
+        save_path = self.saver.save(sess, save_dir)
+        print("Model saved in \"{}\"".format(save_dir))
+        return save_path
+    
+    def restore(self, sess, save_path): self.saver.restore(sess, save_path)
