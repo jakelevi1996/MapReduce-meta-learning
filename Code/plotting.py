@@ -1,32 +1,30 @@
 import matplotlib.pyplot as plt
 import numpy as np
+from matplotlib import cm
 
 def plot_preds(
-    test_image, Y_pred, x_dark_train=None, x_light_train=None,
-    x_condition=None, flip_inds=None, filename="test", verbose=False
+    y_clean, y_condition, condition_inds, y_pred, num_x0_c=28, num_x1_c=28,
+    filename="test", verbose=False
+
 ):
     # Create figure and axes for subplots
-    fig, axes = plt.subplots(1, 2)
-    fig.set_size_inches(16, 9)
-    # Plot input image and conditioning points
-    if test_image.ndim == 1: test_image = test_image.reshape(28, 28)
+    fig, axes = plt.subplots(1, 3)
+    fig.set_size_inches(20, 9)
     e = 1 + 1/28
-    axes[0].imshow(test_image, extent=[-e, e, -e, e])
-    if x_dark_train is not None:
-        axes[0].plot(x_dark_train[:, 0], -x_dark_train[:, 1], "k+")
-    if x_light_train is not None:
-        axes[0].plot(x_light_train[:, 0], -x_light_train[:, 1], "w+")
-    if x_condition is not None:
-        axes[0].plot(x_condition[:, 0], -x_condition[:, 1], "k+")
-    if flip_inds is not None:
-        axes[0].plot(
-            x_condition[:, 0][flip_inds.ravel()],
-            -x_condition[:, 1][flip_inds.ravel()], "r+"
-        )
-    # Plot network output based on conditioning points
-    axes[1].imshow(Y_pred, extent=[-e, e, -e, e])
+    condition_shape = [num_x0_c, num_x1_c]
+    # Plot clean image
+    axes[0].imshow(y_clean.reshape(condition_shape), extent=[-e, e, -e, e])
+    # Plot conditioning image
+    y = np.full(condition_shape, np.nan)
+    y.ravel()[condition_inds] = y_condition.ravel()
+    cm.get_cmap().set_bad("k")
+    axes[1].imshow(y, extent=[-e, e, -e, e])
+    # Plot predicted image
+    axes[2].imshow(y_pred, extent=[-e, e, -e, e])
+
     # Save figure
     if verbose: print("Saving figure...")
+    plt.tight_layout()
     plt.savefig(filename)
     plt.close()
 
@@ -39,5 +37,23 @@ def plot_results(
     plt.xlabel(xlabel)
     plt.ylabel(ylabel)
     plt.title(title)
+    plt.savefig(filename)
+    plt.close()
+
+def plot_sparse_preds(
+    num_x0_c, num_x1_c, y_condition, condition_inds, y_pred,
+    filename="filename", verbose=True
+):
+    # Create figure and axes for subplots
+    fig, axes = plt.subplots(1, 2)
+    fig.set_size_inches(16, 9)
+    # Plot conditioning image
+    y = np.full([num_x0_c, num_x1_c], np.nan)
+    y.ravel()[condition_inds] = y_condition.ravel()
+    cm.get_cmap().set_bad("k")
+    axes[0].imshow(y, extent=[-1, 1, -1, 1])
+    # Plot predicted image
+    axes[1].imshow(y_pred, extent=[-1, 1, -1, 1])
+    if verbose: print("Saving figure...")
     plt.savefig(filename)
     plt.close()

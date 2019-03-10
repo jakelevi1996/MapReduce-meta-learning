@@ -86,7 +86,7 @@ def train_bsr(
 def train_csr(
     csr, image_batches, train_ratio=0.9, num_epochs=10, print_every=1000,
     num_plots=30, model_name="csr", noise_prob=0, max_eval_points=75,
-    save_model=False
+    save_model=False, saved_model_path=None
 ):
     # Create directory for tensorboard logging
     logdir = "results/summaries/" + model_name
@@ -95,26 +95,26 @@ def train_csr(
 
     # Train and save the model
     print("Starting TensorFlow Session...")
+    loss_val, saved_model_dir = 0.0, None
     with tf.Session() as sess:
         writer = tf.summary.FileWriter(logdir, sess.graph)
-        # Initialise variables
-        csr.initialise_variables(sess)
+        # Restore or initialise variables
+        if saved_model_path is not None: csr.restore(sess, saved_model_path)
+        else: csr.initialise_variables(sess)
         # Iterate through each training image:
         t_start, num_images_seen, next_print = time(), 0, 0
         for e in range(num_epochs):
             for image_batch in image_batches:
-                (
-                    x_condition, y_condition, x_eval, y_eval
-                ) = split_continuous_image_batch(
+                x_cnd, y_cnd, x_eval, y_eval = split_continuous_image_batch(
                     image_batch, train_ratio, max_eval_points=max_eval_points
                 )
 
                 if noise_prob > 0.0:
-                    y_noise, _ = add_noise(y_condition, noise_prob)
-                else: y_noise = y_condition
+                    y_noise, _ = add_noise(y_cnd, noise_prob)
+                else: y_noise = y_cnd
 
                 loss_val, summary_val = csr.training_step(
-                    sess, x_condition, y_noise, x_eval, y_eval
+                    sess, x_cnd, y_noise, x_eval, y_eval
                 )
                 num_images_seen += image_batch.shape[0]
                 
@@ -140,35 +140,36 @@ def train_csr(
             x_condition, y_condition, _, _, c_inds = split_continuous_image(
                 image, train_ratio, max_eval_points=max_eval_points
             )
-            y_noise, flip_inds = add_noise(y_condition, noise_prob)
+            y_noise, _ = add_noise(y_condition, noise_prob)
             # Generate points and evaluate
-            # x0, x1 = np.linspace(-1, 1, 100), np.linspace(-1, 1, 100)
-            # X0, X1 = np.meshgrid(x0, x1)
-            # # mesh_shape = X0.shape
-            # X = np.stack([X0.ravel(), X1.ravel()], axis=1)
             num_x0, num_x1 = 100, 100
             X = grid(num_x0, num_x1)
             Y = csr.eval(sess, x_condition, y_noise, X).reshape(num_x1, num_x0)
             # Plot
             filename = "{}/{}.png".format(folder_name, time())
+            # plot_preds(
+            #     image, Y, x_condition=x_condition, flip_inds=flip_inds,
+            #     filename=filename
+            # )
             plot_preds(
-                image, Y, x_condition=x_condition, flip_inds=flip_inds,
-                filename=filename
+                image, y_condition, c_inds, Y, filename=filename,
+                verbose=True
             )
+
         if save_model:
             saved_model_dir = "results/saved models/{}".format(
                 model_name
             )
             while os.path.exists(saved_model_dir): saved_model_dir += "'"
             os.makedirs(saved_model_dir)
-            save_path = "{}/{}".format(saved_model_dir, model_name)
+            saved_model_path = "{}/{}".format(saved_model_dir, model_name)
             # tf.train.Saver().save(sess, folder_name)
-            csr.save(sess, save_path)
+            saved_model_path = csr.save(sess, saved_model_path)
 
 
     print("\n\nTime taken = {:.5} s".format(time() - t_start))
     print("Train ratio = {}, final loss = {:.5}".format(train_ratio, loss_val))
-    return loss_val, saved_model_dir
+    return loss_val, saved_model_path
 
 def sweep_train_ratio():
     train_ratio_list = np.arange(0.1, 1, 0.1)
@@ -266,16 +267,21 @@ if __name__ == "__main__":
     batch_size = 100
     split_inds = range(batch_size, images.shape[0], batch_size)
     image_batches = np.array_split(images, split_inds)
+    saved_model_path="results/saved models/CSR, MSE/CSR, MSE"
 
     # bsr = BinarySetRegressor()
 
     # sweep_train_ratio()
     # sweep_noise_prob()
     # train_l1()
-    # csr = ContinuousSetRegressor()
+    csr = ContinuousSetRegressor()
     # train_csr(csr, image_batches, model_name="CSR, MSE", save_model=True)
     # train_csr(
     #     csr, image_batches, model_name="2 ims", save_model=True,
     # )
-    for _ in range(20):
-        eval_sparse_predictions("results/saved models/CSR, MSE/CSR, MSE")
+    # for _ in range(20):
+    #     eval_sparse_predictions(saved_model_path)
+    train_csr(
+        csr, image_batches, 0.1, model_name="CSR, MSE", num_epochs=0,
+        saved_model_path=saved_model_path
+    )
