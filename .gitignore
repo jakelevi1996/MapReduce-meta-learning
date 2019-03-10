@@ -14,3 +14,9 @@ config.py
 **.txt
 **.tfevents.**
 **vscode**
+
+# Ignore saved models (for now)
+**.data-**
+**.index
+**.meta
+**checkpoint

@@ -405,18 +405,17 @@ class ContinuousSetRegressor():
         return loss_val, summary_val
     
     def eval(
-        self, sess, x_condition, y_condition, x_eval, output_shape=-1,
-        num_batches=1
+        self, sess, x_condition, y_condition, x_eval, num_batches=1
     ):
         return sess.run(self.output, feed_dict={
             self.x_condition: x_condition.reshape(num_batches, -1, 2),
             self.y_condition: y_condition.reshape(num_batches, -1, 1),
             self.x_eval: x_eval.reshape(num_batches, -1, 2),
-        }).reshape(output_shape)
+        })
     
-    def save(self, sess, save_dir):
-        save_path = self.saver.save(sess, save_dir)
-        print("Model saved in \"{}\"".format(save_dir))
+    def save(self, sess, save_path):
+        save_path = self.saver.save(sess, save_path)
+        print("Model saved as <{}>".format(save_path))
         return save_path
     
     def restore(self, sess, save_path): self.saver.restore(sess, save_path)

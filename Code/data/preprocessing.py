@@ -5,6 +5,13 @@ import numpy as np
 
 DEFAULT_RAW_MNIST_FILENAME = "Code/data/mnist_raw.npz"
 
+def grid(num_x0, num_x1, x0_min=-1, x0_max=1, x1_min=-1, x1_max=1):
+    x0 = np.linspace(x0_min, x0_max, num_x0)
+    x1 = np.linspace(x1_min, x1_max, num_x1)
+    X0, X1 = np.meshgrid(x0, x1)
+    X = np.stack([X0.ravel(), X1.ravel()], axis=1)
+    return X
+
 def download_raw_mnist(save_path=DEFAULT_RAW_MNIST_FILENAME):
     # NB these methods are deprecated !!!
     logging.info("Loading MNIST...")
@@ -36,6 +43,7 @@ def split_binary_image(
     x0, x1 = np.linspace(-1, 1, num_x0), np.linspace(-1, 1, num_x1)
     X0, X1 = np.meshgrid(x0, x1)
     X = np.stack([X0.ravel(), X1.ravel()], axis=1)
+    # X = grid(num_x0, num_x1)
     Y = image.reshape([-1, 1])
 
     # Separate dark and light pixels (careful with Boolean indexing)
@@ -118,6 +126,7 @@ def split_continuous_image(
     x0, x1 = np.linspace(-1, 1, num_x0), np.linspace(-1, 1, num_x1)
     X0, X1 = np.meshgrid(x0, x1)
     X = np.stack([X0.ravel(), X1.ravel()], axis=1)
+    # X = grid(num_x0, num_x1)
     Y = image.reshape([-1, 1])
     
     # Separate conditioning and evaluation points
@@ -135,7 +144,7 @@ def split_continuous_image(
     x_eval = x_eval[:max_eval_points]
     y_eval = y_eval[:max_eval_points]
 
-    return x_condition, y_condition, x_eval, y_eval
+    return x_condition, y_condition, x_eval, y_eval, condition_inds
 
 def split_continuous_image_batch(
     image_batch, train_ratio=0.9, num_x0=28, num_x1=28, max_eval_points=75
@@ -144,7 +153,7 @@ def split_continuous_image_batch(
     x_eval_batch, y_eval_batch = [], []
     # Split each image separately (could vectorise?)
     for image in image_batch:
-        x_condition, y_condition, x_eval, y_eval = split_continuous_image(
+        x_condition, y_condition, x_eval, y_eval, _ = split_continuous_image(
             image, train_ratio, num_x0, num_x1, max_eval_points
         )
         x_condition_batch.append(x_condition)
@@ -160,6 +169,23 @@ def split_continuous_image_batch(
     
     return x_condition_batch, y_condition_batch, x_eval_batch, y_eval_batch
 
+def gen_sparse_prediction_inputs(
+    num_x0=28, num_x1=28, num_points=5, uniform=False
+):
+    # x0, x1 = np.linspace(-1, 1, num_x0), np.linspace(-1, 1, num_x1)
+    # X0, X1 = np.meshgrid(x0, x1)
+    # X = np.stack([X0.ravel(), X1.ravel()], axis=1)
+    x = grid(num_x0, num_x1)
+    condition_inds = np.random.choice(x.shape[0], num_points, replace=False)
+    x = x[condition_inds]
+    
+    y_shape = x.shape[0]
+    if uniform: y = np.random.uniform(size=y_shape)
+    else: y = np.random.choice([0, 1], size=y_shape, replace=True)
+    
+    return x, y, condition_inds
+
+
 
 def raw_to_spatial_mnist(data, num_images=1, num_x0=28, num_x1=28):
     assert num_x0 * num_x1 == data.shape[1]
@@ -168,6 +194,8 @@ def raw_to_spatial_mnist(data, num_images=1, num_x0=28, num_x1=28):
     X0, X1 = np.meshgrid(x0, x1)
     # Are the orders of x and y pixels consistent?
     X = np.stack([X0.ravel(), X1.ravel()], axis=1)
+    # X = grid(num_x0, num_x1)
+
     # Brightness values at input locations:
     if num_images > 1:
         # Should select images using `np.random.choice`?
@@ -195,9 +223,11 @@ if __name__ == "__main__":
     # plt.pcolor(*spatial_image_to_matrices(X[i], Y[i]))
     # plt.show()
 
-    batch_size = 3
-    nx0 = 4
-    nx1 = 5
-    images = np.arange(batch_size*nx0*nx1).reshape(batch_size, nx0, nx1) + 100
-    print(images)
-    for i in split_continuous_image_batch(images, 0.5, nx0, nx1): print(i, "\n")
+    # batch_size = 3
+    # nx0 = 4
+    # nx1 = 5
+    # images = np.arange(batch_size*nx0*nx1).reshape(batch_size, nx0, nx1) + 100
+    # print(images)
+    # for i in split_continuous_image_batch(images, 0.5, nx0, nx1):
+    #     print(i, "\n")
+    print(gen_sparse_prediction_inputs(5, 5))

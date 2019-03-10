@@ -7,10 +7,11 @@ from time import time
 import os
 
 from models.neuralmodels import BinarySetRegressor, ContinuousSetRegressor
-from plotting import plot_preds, plot_results
+from plotting import plot_preds, plot_results, plot_sparse_preds
 from data.preprocessing import (
-    load_raw_mnist, split_binary_image, split_binary_image_batch,
-    split_continuous_image, split_continuous_image_batch
+    grid, load_raw_mnist, split_binary_image, split_binary_image_batch,
+    split_continuous_image, split_continuous_image_batch,
+    gen_sparse_prediction_inputs
 )
 
 
@@ -136,18 +137,18 @@ def train_csr(
         for i in plot_inds:
             image = images[i]
             # Split image
-            x_condition, y_condition, _, _ = split_continuous_image(
+            x_condition, y_condition, _, _, c_inds = split_continuous_image(
                 image, train_ratio, max_eval_points=max_eval_points
             )
             y_noise, flip_inds = add_noise(y_condition, noise_prob)
             # Generate points and evaluate
-            x0, x1 = np.linspace(-1, 1, 100), np.linspace(-1, 1, 100)
-            X0, X1 = np.meshgrid(x0, x1)
-            mesh_shape = X0.shape
-            X = np.stack([X0.ravel(), X1.ravel()], axis=1)
-            Y = csr.eval(
-                sess, x_condition, y_noise, X, mesh_shape
-            )
+            # x0, x1 = np.linspace(-1, 1, 100), np.linspace(-1, 1, 100)
+            # X0, X1 = np.meshgrid(x0, x1)
+            # # mesh_shape = X0.shape
+            # X = np.stack([X0.ravel(), X1.ravel()], axis=1)
+            num_x0, num_x1 = 100, 100
+            X = grid(num_x0, num_x1)
+            Y = csr.eval(sess, x_condition, y_noise, X).reshape(num_x1, num_x0)
             # Plot
             filename = "{}/{}.png".format(folder_name, time())
             plot_preds(
@@ -155,15 +156,19 @@ def train_csr(
                 filename=filename
             )
         if save_model:
-            folder_name = "results/saved models/" + model_name
-            while os.path.exists(folder_name): folder_name += "'"
-            os.mkdir(folder_name)
-            tf.train.Saver().save(sess, folder_name)
+            saved_model_dir = "results/saved models/{}".format(
+                model_name
+            )
+            while os.path.exists(saved_model_dir): saved_model_dir += "'"
+            os.makedirs(saved_model_dir)
+            save_path = "{}/{}".format(saved_model_dir, model_name)
+            # tf.train.Saver().save(sess, folder_name)
+            csr.save(sess, save_path)
 
 
     print("\n\nTime taken = {:.5} s".format(time() - t_start))
     print("Train ratio = {}, final loss = {:.5}".format(train_ratio, loss_val))
-    return loss_val
+    return loss_val, saved_model_dir
 
 def sweep_train_ratio():
     train_ratio_list = np.arange(0.1, 1, 0.1)
@@ -174,7 +179,7 @@ def sweep_train_ratio():
     csr = ContinuousSetRegressor()
     for train_ratio in train_ratio_list:
         model_name = "CSR, TR = {:.4}".format(train_ratio)
-        loss = train_csr(
+        loss, _ = train_csr(
             csr, image_batches, train_ratio=train_ratio, model_name=model_name,
         )
         loss_list.append(loss)
@@ -200,7 +205,7 @@ def sweep_noise_prob():
     csr = ContinuousSetRegressor()
     for noise_prob in noise_prob_list:
         model_name = "CSR, noise prob = {:.4}".format(noise_prob)
-        loss = train_csr(
+        loss, _ = train_csr(
             csr, image_batches, noise_prob=noise_prob, model_name=model_name,
         )
         loss_list.append(loss)
@@ -225,6 +230,32 @@ def train_l1():
     train_csr(csr, image_batches, model_name=model_name)
     tf.reset_default_graph()
 
+def eval_sparse_predictions(saved_model_path, sequential=False):
+    num_x0_c, num_x1_c = 28, 28
+    num_x0_e, num_x1_e = 100, 100
+    csr = ContinuousSetRegressor()
+    with tf.Session() as sess:
+        csr.restore(sess, saved_model_path)
+        x_condition, y_condition, c_inds = gen_sparse_prediction_inputs(
+            num_x0_c, num_x1_c
+        )
+        # x_condition, y_condition, _, _, c_inds = split_continuous_image(
+        #     images[1], 0.9, max_eval_points=75
+        # )
+
+        x_eval = grid(num_x0_e, num_x1_e)
+        y_pred = csr.eval(sess, x_condition, y_condition, x_eval)
+        y_pred = y_pred.reshape(num_x0_e, num_x1_e)
+
+        plot_sparse_preds(
+            num_x0_c, num_x1_c, y_condition, c_inds, y_pred,
+            filename="results/predictions (parallel)/{}.png".format(time())
+        )
+    
+    
+    tf.reset_default_graph()
+
+
 
 if __name__ == "__main__":
 
@@ -241,6 +272,10 @@ if __name__ == "__main__":
     # sweep_train_ratio()
     # sweep_noise_prob()
     # train_l1()
-    csr = ContinuousSetRegressor()
-    model_name = "CSR, MSE"
-    train_csr(csr, image_batches, model_name=model_name, save_model=True)
+    # csr = ContinuousSetRegressor()
+    # train_csr(csr, image_batches, model_name="CSR, MSE", save_model=True)
+    # train_csr(
+    #     csr, image_batches, model_name="2 ims", save_model=True,
+    # )
+    for _ in range(20):
+        eval_sparse_predictions("results/saved models/CSR, MSE/CSR, MSE")
