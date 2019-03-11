@@ -172,18 +172,17 @@ def split_continuous_image_batch(
 def gen_sparse_prediction_inputs(
     num_x0=28, num_x1=28, num_points=5, uniform=False
 ):
-    # x0, x1 = np.linspace(-1, 1, num_x0), np.linspace(-1, 1, num_x1)
-    # X0, X1 = np.meshgrid(x0, x1)
-    # X = np.stack([X0.ravel(), X1.ravel()], axis=1)
     x = grid(num_x0, num_x1)
     condition_inds = np.random.choice(x.shape[0], num_points, replace=False)
-    x = x[condition_inds]
+    x_condition = x[condition_inds]
+    x_eval = np.delete(x, condition_inds, axis=0)
+    np.random.shuffle(x_eval)
     
-    y_shape = x.shape[0]
+    y_shape = x_condition.shape[0]
     if uniform: y = np.random.uniform(size=y_shape)
     else: y = np.random.choice([0, 1], size=y_shape, replace=True)
     
-    return x, y, condition_inds
+    return x_condition, y, condition_inds, x_eval
 
 
 

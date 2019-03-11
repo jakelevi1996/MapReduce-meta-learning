@@ -5,7 +5,6 @@ from matplotlib import cm
 def plot_preds(
     y_clean, y_condition, condition_inds, y_pred, num_x0_c=28, num_x1_c=28,
     filename="test", verbose=False
-
 ):
     # Create figure and axes for subplots
     fig, axes = plt.subplots(1, 3)
@@ -14,13 +13,16 @@ def plot_preds(
     condition_shape = [num_x0_c, num_x1_c]
     # Plot clean image
     axes[0].imshow(y_clean.reshape(condition_shape), extent=[-e, e, -e, e])
-    # Plot conditioning image
+    axes[0].title("Original clean image")
+    # Plot noisy conditioning image
     y = np.full(condition_shape, np.nan)
     y.ravel()[condition_inds] = y_condition.ravel()
     cm.get_cmap().set_bad("k")
     axes[1].imshow(y, extent=[-e, e, -e, e])
+    axes[1].title("Input noisy conditioning points")
     # Plot predicted image
     axes[2].imshow(y_pred, extent=[-e, e, -e, e])
+    axes[2].title("Output model predictions")
 
     # Save figure
     if verbose: print("Saving figure...")

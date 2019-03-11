@@ -15,10 +15,17 @@ from data.preprocessing import (
 )
 
 
-def add_noise(y_condition, noise_prob):
-    flip_inds = np.random.binomial(1, noise_prob, y_condition.shape) > 0
+def add_flip_noise(y_condition, flip_prob):
+    flip_inds = np.random.binomial(1, flip_prob, y_condition.shape) > 0
     y_noise = np.where(flip_inds, 1.0 - y_condition, y_condition)
-    return y_noise, flip_inds
+    return y_noise
+
+def add_gaussian_noise(y_condition, noise_var=0.1, low=0.0, high=1.0):
+    y_noise = y_condition + np.random.normal(0, noise_var, y_condition.shape)
+    y_noise[y_noise < low] = low
+    y_noise[y_noise > high] = high
+    return y_noise
+
 
 def train_bsr(
     bsr, image_batches, train_ratio=0.9, num_epochs=10, print_every=100,
@@ -85,8 +92,8 @@ def train_bsr(
 
 def train_csr(
     csr, image_batches, train_ratio=0.9, num_epochs=10, print_every=1000,
-    num_plots=30, model_name="csr", noise_prob=0, max_eval_points=75,
-    save_model=False, saved_model_path=None
+    num_plots=30, model_name="csr", max_eval_points=75, save_model=False,
+    saved_model_path=None, noise_var=0.1, flip_prob=0
 ):
     # Create directory for tensorboard logging
     logdir = "results/summaries/" + model_name
@@ -108,10 +115,11 @@ def train_csr(
                 x_cnd, y_cnd, x_eval, y_eval = split_continuous_image_batch(
                     image_batch, train_ratio, max_eval_points=max_eval_points
                 )
-
-                if noise_prob > 0.0:
-                    y_noise, _ = add_noise(y_cnd, noise_prob)
-                else: y_noise = y_cnd
+                y_noise = y_cnd
+                if flip_prob > 0.0:
+                    y_noise = add_flip_noise(y_cnd, flip_prob)
+                if noise_var > 0.0:
+                    y_noise = add_gaussian_noise(y_cnd, noise_var)
 
                 loss_val, summary_val = csr.training_step(
                     sess, x_cnd, y_noise, x_eval, y_eval
@@ -140,19 +148,16 @@ def train_csr(
             x_condition, y_condition, _, _, c_inds = split_continuous_image(
                 image, train_ratio, max_eval_points=max_eval_points
             )
-            y_noise, _ = add_noise(y_condition, noise_prob)
+            y_noise = add_flip_noise(y_condition, flip_prob)
+            y_noise = add_gaussian_noise(y_noise, noise_var)
             # Generate points and evaluate
             num_x0, num_x1 = 100, 100
             X = grid(num_x0, num_x1)
             Y = csr.eval(sess, x_condition, y_noise, X).reshape(num_x1, num_x0)
             # Plot
             filename = "{}/{}.png".format(folder_name, time())
-            # plot_preds(
-            #     image, Y, x_condition=x_condition, flip_inds=flip_inds,
-            #     filename=filename
-            # )
             plot_preds(
-                image, y_condition, c_inds, Y, filename=filename,
+                image, y_noise, c_inds, Y, filename=filename,
                 verbose=True
             )
 
@@ -198,28 +203,28 @@ def sweep_train_ratio():
     tf.reset_default_graph()
 
 
-def sweep_noise_prob():
-    noise_prob_list = np.arange(0.0, 0.40, 0.05)
+def sweep_flip_prob():
+    flip_prob_list = np.arange(0.0, 0.40, 0.05)
     loss_list = []
 
     print("Initialising computational graph...")
     csr = ContinuousSetRegressor()
-    for noise_prob in noise_prob_list:
-        model_name = "CSR, noise prob = {:.4}".format(noise_prob)
+    for flip_prob in flip_prob_list:
+        model_name = "CSR, flip prob = {:.4}".format(flip_prob)
         loss, _ = train_csr(
-            csr, image_batches, noise_prob=noise_prob, model_name=model_name,
+            csr, image_batches, flip_prob=flip_prob, model_name=model_name,
         )
         loss_list.append(loss)
     
-    print(noise_prob_list, loss_list)
+    print(flip_prob_list, loss_list)
     plot_results(
-        noise_prob_list, loss_list, "Flip probability",
+        flip_prob_list, loss_list, "Flip probability",
         title="Final loss vs probability of pixel-flip noise",
         filename="results/sweep_noise_prob"
     )
     np.savetxt(
         "results/sweep_noise_prob.txt",
-        [noise_prob_list, loss_list], fmt="%10.5g"
+        [flip_prob_list, loss_list], fmt="%10.5g"
     )
     tf.reset_default_graph()
 
@@ -231,26 +236,39 @@ def train_l1():
     train_csr(csr, image_batches, model_name=model_name)
     tf.reset_default_graph()
 
-def eval_sparse_predictions(saved_model_path, sequential=False):
-    num_x0_c, num_x1_c = 28, 28
-    num_x0_e, num_x1_e = 100, 100
+def eval_sparse_predictions(
+    saved_model_path, sequential=False, num_cnd_points=5
+):
+    tf.reset_default_graph()
     csr = ContinuousSetRegressor()
+    num_x0_c, num_x1_c = 28, 28
     with tf.Session() as sess:
         csr.restore(sess, saved_model_path)
-        x_condition, y_condition, c_inds = gen_sparse_prediction_inputs(
-            num_x0_c, num_x1_c
+        x_cnd, y_cnd, c_inds, x_eval = gen_sparse_prediction_inputs(
+            num_x0_c, num_x1_c, num_cnd_points
         )
-        # x_condition, y_condition, _, _, c_inds = split_continuous_image(
-        #     images[1], 0.9, max_eval_points=75
+        
+        # x_cnd, y_cnd, x_eval, _, c_inds = split_continuous_image(
+        #     images[0], 0.9, max_eval_points=5
         # )
-
+        y_cnd_old = y_cnd
+        if sequential:
+            x_eval = list(x_eval)
+            while len(x_eval) > 0:
+                x_new = x_eval.pop()
+                y_new = csr.eval(sess, x_cnd, y_cnd, x_new)
+                x_cnd = np.append(x_cnd, [x_new], axis=0)
+                y_cnd = np.append(y_cnd, y_new)
+            filename="results/predictions (sequential)/{}.png".format(time())
+        else:
+            filename="results/predictions (parallel)/{}.png".format(time())
+        num_x0_e, num_x1_e = 100, 100
         x_eval = grid(num_x0_e, num_x1_e)
-        y_pred = csr.eval(sess, x_condition, y_condition, x_eval)
+        y_pred = csr.eval(sess, x_cnd, y_cnd, x_eval)
         y_pred = y_pred.reshape(num_x0_e, num_x1_e)
 
         plot_sparse_preds(
-            num_x0_c, num_x1_c, y_condition, c_inds, y_pred,
-            filename="results/predictions (parallel)/{}.png".format(time())
+            num_x0_c, num_x1_c, y_cnd_old, c_inds, y_pred, filename=filename
         )
     
     
@@ -279,9 +297,11 @@ if __name__ == "__main__":
     # train_csr(
     #     csr, image_batches, model_name="2 ims", save_model=True,
     # )
-    # for _ in range(20):
-    #     eval_sparse_predictions(saved_model_path)
-    train_csr(
-        csr, image_batches, 0.1, model_name="CSR, MSE", num_epochs=0,
-        saved_model_path=saved_model_path
-    )
+    for _ in range(10):
+        eval_sparse_predictions(
+            saved_model_path, sequential=False, num_cnd_points=50
+        )
+    # train_csr(
+    #     csr, image_batches, 0.9, model_name="Gaussian TR 0.9 var 0.1",
+    #     num_epochs=0, saved_model_path=saved_model_path, noise_var=0.1
+    # )
