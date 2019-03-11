@@ -13,16 +13,16 @@ def plot_preds(
     condition_shape = [num_x0_c, num_x1_c]
     # Plot clean image
     axes[0].imshow(y_clean.reshape(condition_shape), extent=[-e, e, -e, e])
-    axes[0].title("Original clean image")
+    axes[0].set_title("Original clean image")
     # Plot noisy conditioning image
     y = np.full(condition_shape, np.nan)
     y.ravel()[condition_inds] = y_condition.ravel()
     cm.get_cmap().set_bad("k")
     axes[1].imshow(y, extent=[-e, e, -e, e])
-    axes[1].title("Input noisy conditioning points")
+    axes[1].set_title("Input noisy conditioning points")
     # Plot predicted image
     axes[2].imshow(y_pred, extent=[-e, e, -e, e])
-    axes[2].title("Output model predictions")
+    axes[2].set_title("Output model predictions")
 
     # Save figure
     if verbose: print("Saving figure...")
@@ -31,7 +31,7 @@ def plot_preds(
     plt.close()
 
 def plot_results(
-    x, y, xlabel, ylabel="Final loss", title="title", filename="filename"
+    x, y, xlabel, ylabel="Final MSE", title="title", filename="filename"
 ):
     plt.figure(figsize=[8, 6])
     plt.plot(x, y, "bo")

@@ -229,6 +229,33 @@ def sweep_flip_prob():
     tf.reset_default_graph()
 
 
+def sweep_noise_var():
+    noise_var_list = np.arange(0.0, 0.2, 0.01)
+    loss_list = []
+
+    print("Initialising computational graph...")
+    csr = ContinuousSetRegressor()
+    for noise_var in noise_var_list:
+        model_name = "CSR, noise var = {:.4}".format(noise_var)
+        loss, _ = train_csr(
+            csr, image_batches, noise_var=noise_var, model_name=model_name,
+            save_model=True
+        )
+        loss_list.append(loss)
+    
+    print(noise_var_list, loss_list)
+    plot_results(
+        noise_var_list, loss_list, "Noise variance",
+        title="Final MSE vs variance of Gaussian noise",
+        filename="results/sweep_noise_var"
+    )
+    np.savetxt(
+        "results/sweep_noise_prob.txt",
+        [noise_var_list, loss_list], fmt="%10.5g"
+    )
+    tf.reset_default_graph()
+
+
 def train_l1():
     print("Initialising computational graph...")
     csr = ContinuousSetRegressor(loss_func=tf.losses.absolute_difference)
@@ -279,8 +306,8 @@ def eval_sparse_predictions(
 if __name__ == "__main__":
 
     print("Loading images...")
-    images = load_raw_mnist()[0]
-    # images = load_raw_mnist()[0][1:3]
+    # images = load_raw_mnist()[0]
+    images = load_raw_mnist()[0][1:3]
     np.random.shuffle(images)
     batch_size = 100
     split_inds = range(batch_size, images.shape[0], batch_size)
@@ -291,16 +318,17 @@ if __name__ == "__main__":
 
     # sweep_train_ratio()
     # sweep_noise_prob()
+    sweep_noise_var()
     # train_l1()
-    csr = ContinuousSetRegressor()
+    # csr = ContinuousSetRegressor()
     # train_csr(csr, image_batches, model_name="CSR, MSE", save_model=True)
     # train_csr(
     #     csr, image_batches, model_name="2 ims", save_model=True,
     # )
-    for _ in range(10):
-        eval_sparse_predictions(
-            saved_model_path, sequential=False, num_cnd_points=50
-        )
+    # for _ in range(10):
+    #     eval_sparse_predictions(
+    #         saved_model_path, sequential=False, num_cnd_points=50
+    #     )
     # train_csr(
     #     csr, image_batches, 0.9, model_name="Gaussian TR 0.9 var 0.1",
     #     num_epochs=0, saved_model_path=saved_model_path, noise_var=0.1
