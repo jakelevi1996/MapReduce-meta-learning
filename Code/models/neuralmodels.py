@@ -331,6 +331,35 @@ class ContinuousSetRegressor():
         num_hidden_layers_pre_reduce=2, num_hidden_layers_post_reduce=4,
         learning_rate=1e-3, loss_func=tf.losses.mean_squared_error
     ):
+        self.create_hidden_layers(
+            num_hidden_units, hidden_activation,
+            num_hidden_layers_pre_reduce, num_hidden_layers_post_reduce
+        )
+        # Define output
+        logits = tf.layers.dense(
+            inputs=self.post_reduce_hidden_layers[-1], units=1, name="logits"
+        )
+        # Maybe should use linear output and MSE?
+        self.output = tf.sigmoid(logits, name="output")
+
+        # Define loss, training and initialisation operations
+        self.loss_op = loss_func(self.y_eval, logits )
+        self.train_op = tf.train.AdamOptimizer(learning_rate).minimize(
+            self.loss_op
+        )
+
+        self.init_op = tf.global_variables_initializer()
+
+        # Create summaries, for visualising in Tensorboard
+        self.summary_op = tf.summary.scalar("Loss", self.loss_op)
+
+        # Create saver object
+        self.saver = tf.train.Saver()
+    
+    def create_hidden_layers(
+        self, num_hidden_units, hidden_activation,
+        num_hidden_layers_pre_reduce, num_hidden_layers_post_reduce
+    ):
         # Input placeholders
         self.x_condition = tf.placeholder(tf.float32, shape=[None, None, 2])
         self.y_condition = tf.placeholder(tf.float32, shape=[None, None, 1])
@@ -362,49 +391,29 @@ class ContinuousSetRegressor():
             [tile_op, self.x_eval], axis=2, name="concatenate"
         )
         # Dense layers for output from reduce operations to final output
-        post_reduce_hidden_layers = [tf.layers.dense(
+        self.post_reduce_hidden_layers = [tf.layers.dense(
             inputs=concat_op, units=num_hidden_units,
             activation=hidden_activation, name="post_reduce_1"
         )]
         for i in range(1, num_hidden_layers_post_reduce - 1):
-            post_reduce_hidden_layers.append(tf.layers.dense(
-                inputs=post_reduce_hidden_layers[-1], units=num_hidden_units,
+            self.post_reduce_hidden_layers.append(tf.layers.dense(
+                self.post_reduce_hidden_layers[-1], num_hidden_units,
                 activation=hidden_activation, name="post_reduce_"+str(i+1)
             ))
-        logits = tf.layers.dense(
-            inputs=post_reduce_hidden_layers[-1], units=1, name="logits"
-        )
-        # Maybe should use linear output and MSE?
-        self.output = tf.sigmoid(logits, name="output")
-
-        # Define loss, training and initialisation operations
-        self.loss_op = loss_func(self.y_eval, logits )
-        self.train_op = tf.train.AdamOptimizer(learning_rate).minimize(
-            self.loss_op
-        )
-
-        self.init_op = tf.global_variables_initializer()
-
-        # Create summaries, for visualising in Tensorboard
-        self.summary_op = tf.summary.scalar("Loss", self.loss_op)
-
-        # Create saver object
-        self.saver = tf.train.Saver()
     
     def initialise_variables(self, sess): sess.run(self.init_op)
     
     def training_step(self, sess, x_condition, y_condition, x_eval, y_eval):
-        loss_val, summary_val, _ = sess.run(
-            (self.loss_op, self.summary_op, self.train_op), feed_dict={
+        sess.run(
+            self.train_op, feed_dict={
                 self.x_condition: x_condition,
                 self.y_condition: y_condition,
                 self.x_eval: x_eval,
                 self.y_eval: y_eval,
             }
         )
-        return loss_val, summary_val
     
-    def eval(
+    def eval_output(
         self, sess, x_condition, y_condition, x_eval, num_batches=1
     ):
         return sess.run(self.output, feed_dict={
@@ -413,9 +422,21 @@ class ContinuousSetRegressor():
             self.x_eval: x_eval.reshape(num_batches, -1, 2),
         })
     
+    def eval_loss(self, sess, x_condition, y_condition, x_eval, y_eval):
+        loss_val, summary_val = sess.run(
+            [self.loss_op, self.summary_op], feed_dict={
+                self.x_condition: x_condition,
+                self.y_condition: y_condition,
+                self.x_eval: x_eval,
+                self.y_eval: y_eval,
+            }
+        )
+        return loss_val, summary_val
+    
     def save(self, sess, save_path):
         save_path = self.saver.save(sess, save_path)
         print("Model saved as <{}>".format(save_path))
         return save_path
     
     def restore(self, sess, save_path): self.saver.restore(sess, save_path)
+

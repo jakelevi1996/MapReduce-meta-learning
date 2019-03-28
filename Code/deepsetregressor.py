@@ -20,16 +20,16 @@ def add_flip_noise(y_condition, flip_prob):
     y_noise = np.where(flip_inds, 1.0 - y_condition, y_condition)
     return y_noise
 
-def add_gaussian_noise(y_condition, noise_var=0.1, low=0.0, high=1.0):
-    y_noise = y_condition + np.random.normal(0, noise_var, y_condition.shape)
+def add_gaussian_noise(y_condition, noise_std=0.1, low=0.0, high=1.0):
+    y_noise = y_condition + np.random.normal(0, noise_std, y_condition.shape)
     y_noise[y_noise < low] = low
     y_noise[y_noise > high] = high
     return y_noise
 
 
 def train_bsr(
-    bsr, image_batches, train_ratio=0.9, num_epochs=10, print_every=100,
-    plot_every=1000, logdir="results/summaries"
+    bsr, train_image_batches, test_images, train_ratio=0.9, num_epochs=10,
+    print_every=100, plot_every=1000, logdir="results/summaries"
 ):
     next_print, next_plot = 0, 0
 
@@ -42,7 +42,7 @@ def train_bsr(
         # Iterate through each training image:
         t_start, num_images_seen = time(), 0
         for e in range(num_epochs):
-            for image_batch in image_batches:
+            for image_batch in train_image_batches:
                 (
                     x_dark_train, x_light_train, x_test, y_test
                 ) = split_binary_image_batch(image_batch, train_ratio)
@@ -62,8 +62,8 @@ def train_bsr(
                 # Plot predictions
                 if num_images_seen >= next_plot:
                     # Choose a random image
-                    image_ind = np.random.choice(images.shape[0])
-                    image = images[image_ind]
+                    image_ind = np.random.choice(test_images.shape[0])
+                    image = test_images[image_ind]
                     # Split image
                     x_dark_train, x_light_train, _, _ = split_binary_image(
                         image, train_ratio
@@ -90,10 +90,25 @@ def train_bsr(
     print("\n\nTime taken = {:.5} s".format(time() - t_start))
     print("Train ratio = {}, final loss = {:.5}".format(train_ratio, loss_val))
 
+def split_and_add_noise(
+    image_batch, train_ratio, max_eval_points, flip_prob, noise_std
+):
+    # Split image into conditioning set and evaluation set
+    x_cnd, y_cnd, x_eval, y_eval = split_continuous_image_batch(
+        image_batch, train_ratio, max_eval_points=max_eval_points
+    )
+    # Add noise to input brightness values
+    y_noise = y_cnd
+    if flip_prob > 0.0: y_noise = add_flip_noise(y_noise, flip_prob)
+    if noise_std > 0.0: y_noise = add_gaussian_noise(y_noise, noise_std)
+
+    return x_cnd, y_noise, x_eval, y_eval
+
 def train_csr(
-    csr, image_batches, train_ratio=0.9, num_epochs=10, print_every=1000,
-    num_plots=30, model_name="csr", max_eval_points=75, save_model=False,
-    saved_model_path=None, noise_var=0.1, flip_prob=0
+    csr, train_images, test_images, batch_size=100, train_ratio=0.9,
+    num_epochs=10, print_every=1000, num_plots=30, model_name="csr",
+    max_eval_points=75, save_model=False, saved_model_path=None, noise_std=0.1,
+    flip_prob=0
 ):
     # Create directory for tensorboard logging
     logdir = "results/summaries/" + model_name
@@ -111,49 +126,69 @@ def train_csr(
         # Iterate through each training image:
         t_start, num_images_seen, next_print = time(), 0, 0
         for e in range(num_epochs):
-            for image_batch in image_batches:
-                x_cnd, y_cnd, x_eval, y_eval = split_continuous_image_batch(
-                    image_batch, train_ratio, max_eval_points=max_eval_points
-                )
-                y_noise = y_cnd
-                if flip_prob > 0.0:
-                    y_noise = add_flip_noise(y_cnd, flip_prob)
-                if noise_var > 0.0:
-                    y_noise = add_gaussian_noise(y_cnd, noise_var)
+            # Shuffle train images and split into batches
+            np.random.shuffle(train_images)
+            split_inds = range(batch_size, train_images.shape[0], batch_size)
+            image_batches = np.array_split(train_images, split_inds)
 
-                loss_val, summary_val = csr.training_step(
-                    sess, x_cnd, y_noise, x_eval, y_eval
+            # Loop through each batch of images
+            for image_batch in image_batches:
+                # Split image batch and add noise
+                x_cnd, y_noise, x_eval, y_eval = split_and_add_noise(
+                    image_batch, train_ratio, max_eval_points, flip_prob,
+                    noise_std
                 )
+                # Perform training step
+                csr.training_step(sess, x_cnd, y_noise, x_eval, y_eval)
                 num_images_seen += image_batch.shape[0]
                 
-                # Add summary to Tensorboard
+                # Add summary to Tensorboard and print progress
                 if num_images_seen >= next_print:
+                    # Choose test images
+                    num_test_images = min(batch_size, test_images.shape[0])
+                    test_inds = np.random.choice(
+                        test_images.shape[0], size=num_test_images,
+                        replace=False
+                    )
+                    test_image_batch = test_images[test_inds]
+                    # Split image batch and add noise
+                    x_cnd, y_noise, x_eval, y_eval = split_and_add_noise(
+                        test_image_batch, train_ratio, max_eval_points,
+                        flip_prob, noise_std
+                    )
+                    # Eval loss and summary, add to tensorboard and print
+                    loss_val, summary_val = csr.eval_loss(
+                        sess, x_cnd, y_noise, x_eval, y_eval
+                    )
                     writer.add_summary(summary_val, num_images_seen)
-                    print("E = {}, NIS = {}, loss = {:.5}.png".format(
-                        e, num_images_seen, loss_val
+                    print("E = {}, NIS = {}, loss = {:.5}, t = {:.4} s".format(
+                        e, num_images_seen, loss_val, time() - t_start
                     ))
                     next_print += print_every
 
         # If necessary, adjust number of images to plot, and folder name
-        num_plots = min(images.shape[0], num_plots)
+        num_plots = min(test_images.shape[0], num_plots)
         folder_name = "results/images/" + model_name
         while os.path.exists(folder_name): folder_name += "'"
         os.mkdir(folder_name)
         # Choose some random images to plot
-        # NB these should really be sampled from test images
-        plot_inds = np.random.choice(images.shape[0], num_plots, replace=False)
+        plot_inds = np.random.choice(
+            test_images.shape[0], num_plots, replace=False
+        )
         for i in plot_inds:
-            image = images[i]
+            image = test_images[i]
             # Split image
             x_condition, y_condition, _, _, c_inds = split_continuous_image(
                 image, train_ratio, max_eval_points=max_eval_points
             )
             y_noise = add_flip_noise(y_condition, flip_prob)
-            y_noise = add_gaussian_noise(y_noise, noise_var)
+            y_noise = add_gaussian_noise(y_noise, noise_std)
             # Generate points and evaluate
             num_x0, num_x1 = 100, 100
             X = grid(num_x0, num_x1)
-            Y = csr.eval(sess, x_condition, y_noise, X).reshape(num_x1, num_x0)
+            Y = csr.eval_output(sess, x_condition, y_noise, X).reshape(
+                num_x1, num_x0
+            )
             # Plot
             filename = "{}/{}.png".format(folder_name, time())
             plot_preds(
@@ -162,9 +197,7 @@ def train_csr(
             )
 
         if save_model:
-            saved_model_dir = "results/saved models/{}".format(
-                model_name
-            )
+            saved_model_dir = "results/saved models/{}".format(model_name)
             while os.path.exists(saved_model_dir): saved_model_dir += "'"
             os.makedirs(saved_model_dir)
             saved_model_path = "{}/{}".format(saved_model_dir, model_name)
@@ -176,7 +209,7 @@ def train_csr(
     print("Train ratio = {}, final loss = {:.5}".format(train_ratio, loss_val))
     return loss_val, saved_model_path
 
-def sweep_train_ratio():
+def sweep_train_ratio(train_images, test_images):
     train_ratio_list = np.arange(0.1, 1, 0.1)
     loss_list = []
 
@@ -186,7 +219,8 @@ def sweep_train_ratio():
     for train_ratio in train_ratio_list:
         model_name = "CSR, TR = {:.4}".format(train_ratio)
         loss, _ = train_csr(
-            csr, image_batches, train_ratio=train_ratio, model_name=model_name,
+            csr, train_images, test_images, train_ratio=train_ratio,
+            model_name=model_name,
         )
         loss_list.append(loss)
     
@@ -203,7 +237,7 @@ def sweep_train_ratio():
     tf.reset_default_graph()
 
 
-def sweep_flip_prob():
+def sweep_flip_prob(train_images, test_images):
     flip_prob_list = np.arange(0.0, 0.40, 0.05)
     loss_list = []
 
@@ -212,7 +246,8 @@ def sweep_flip_prob():
     for flip_prob in flip_prob_list:
         model_name = "CSR, flip prob = {:.4}".format(flip_prob)
         loss, _ = train_csr(
-            csr, image_batches, flip_prob=flip_prob, model_name=model_name,
+            csr, train_images, test_images, flip_prob=flip_prob,
+            model_name=model_name,
         )
         loss_list.append(loss)
     
@@ -229,17 +264,17 @@ def sweep_flip_prob():
     tf.reset_default_graph()
 
 
-def sweep_noise_var():
+def sweep_noise_var(train_images, test_images):
     noise_var_list = np.arange(0.0, 0.2, 0.01)
     loss_list = []
 
     print("Initialising computational graph...")
     csr = ContinuousSetRegressor()
-    for noise_var in noise_var_list:
-        model_name = "CSR, noise var = {:.4}".format(noise_var)
+    for noise_std in noise_var_list:
+        model_name = "CSR, noise var = {:.4}".format(noise_std)
         loss, _ = train_csr(
-            csr, image_batches, noise_var=noise_var, model_name=model_name,
-            save_model=True
+            csr, train_images, test_images, noise_std=noise_std,
+            model_name=model_name, save_model=True
         )
         loss_list.append(loss)
     
@@ -256,15 +291,16 @@ def sweep_noise_var():
     tf.reset_default_graph()
 
 
-def train_l1():
+def train_l1(train_images, test_images):
     print("Initialising computational graph...")
     csr = ContinuousSetRegressor(loss_func=tf.losses.absolute_difference)
     model_name = "CSR, L1 loss"
-    train_csr(csr, image_batches, model_name=model_name)
+    train_csr(csr, train_images, test_images, model_name=model_name)
     tf.reset_default_graph()
 
 def eval_sparse_predictions(
-    saved_model_path, sequential=False, num_cnd_points=5
+    train_images, test_images, saved_model_path, sequential=False,
+    num_cnd_points=5
 ):
     tf.reset_default_graph()
     csr = ContinuousSetRegressor()
@@ -283,7 +319,7 @@ def eval_sparse_predictions(
             x_eval = list(x_eval)
             while len(x_eval) > 0:
                 x_new = x_eval.pop()
-                y_new = csr.eval(sess, x_cnd, y_cnd, x_new)
+                y_new = csr.eval_output(sess, x_cnd, y_cnd, x_new)
                 x_cnd = np.append(x_cnd, [x_new], axis=0)
                 y_cnd = np.append(y_cnd, y_new)
             filename="results/predictions (sequential)/{}.png".format(time())
@@ -291,7 +327,7 @@ def eval_sparse_predictions(
             filename="results/predictions (parallel)/{}.png".format(time())
         num_x0_e, num_x1_e = 100, 100
         x_eval = grid(num_x0_e, num_x1_e)
-        y_pred = csr.eval(sess, x_cnd, y_cnd, x_eval)
+        y_pred = csr.eval_output(sess, x_cnd, y_cnd, x_eval)
         y_pred = y_pred.reshape(num_x0_e, num_x1_e)
 
         plot_sparse_preds(
@@ -301,35 +337,60 @@ def eval_sparse_predictions(
     
     tf.reset_default_graph()
 
+def time_image_batch_split(images, batch_size=100):
+    print("Starting `time_image_batch_split` function")
+    # Record number of images and start time
+    num_images = images.shape[0]
+    t_start = time()
+    # Shuffle
+    np.random.shuffle(images)
+    t_shuffle = time() - t_start
+    # Split into batches
+    split_inds = range(batch_size, train_images.shape[0], batch_size)
+    np.array_split(train_images, split_inds)
+    t_batch = time() - t_start - t_shuffle
+    # Print results
+    print("{} images were shuffled in {:.4} s, batched in {:.4} s".format(
+        num_images, t_shuffle, t_batch
+    ))
+    print("Total = {:.4} s".format(t_shuffle + t_batch))
+    # Output:
+        # 55000 images were shuffled in 0.1721 s, batched in 0.002002 s
+        # Total = 0.1741 s
+
 
 
 if __name__ == "__main__":
 
     print("Loading images...")
-    # images = load_raw_mnist()[0]
-    images = load_raw_mnist()[0][1:3]
-    np.random.shuffle(images)
-    batch_size = 100
-    split_inds = range(batch_size, images.shape[0], batch_size)
-    image_batches = np.array_split(images, split_inds)
-    saved_model_path="results/saved models/CSR, MSE/CSR, MSE"
+    train_images, _, test_images, _ = load_raw_mnist()
+    # images = load_raw_mnist()[0][1:3]
+    # time_image_batch_split(train_images)
+    train_images = test_images = train_images[1:3]
+
+    # np.random.shuffle(train_images)
+    # batch_size = 100
+    # split_inds = range(batch_size, train_images.shape[0], batch_size)
+    # image_batches = np.array_split(train_images, split_inds)
+    # saved_model_path="results/saved models/CSR, MSE/CSR, MSE"
 
     # bsr = BinarySetRegressor()
 
     # sweep_train_ratio()
     # sweep_noise_prob()
-    sweep_noise_var()
+    # sweep_noise_var(train_images, test_images)
     # train_l1()
-    # csr = ContinuousSetRegressor()
+    csr = ContinuousSetRegressor()
     # train_csr(csr, image_batches, model_name="CSR, MSE", save_model=True)
-    # train_csr(
-    #     csr, image_batches, model_name="2 ims", save_model=True,
-    # )
+    train_csr(
+        csr, train_images, test_images, model_name="2 ims", save_model=True,
+        print_every=1, num_epochs=200
+    )
     # for _ in range(10):
     #     eval_sparse_predictions(
     #         saved_model_path, sequential=False, num_cnd_points=50
     #     )
     # train_csr(
     #     csr, image_batches, 0.9, model_name="Gaussian TR 0.9 var 0.1",
-    #     num_epochs=0, saved_model_path=saved_model_path, noise_var=0.1
+    #     num_epochs=0, saved_model_path=saved_model_path, noise_std=0.1
     # )
