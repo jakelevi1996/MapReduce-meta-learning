@@ -340,7 +340,8 @@ class ContinuousSetRegressor():
             inputs=self.post_reduce_hidden_layers[-1], units=1, name="logits"
         )
         # Maybe should use linear output and MSE?
-        self.output = tf.sigmoid(logits, name="output")
+        # self.output = tf.sigmoid(logits, name="output")
+        self.output = logits
 
         # Define loss, training and initialisation operations
         self.loss_op = loss_func(self.y_eval, logits )
@@ -435,8 +436,113 @@ class ContinuousSetRegressor():
     
     def save(self, sess, save_path):
         save_path = self.saver.save(sess, save_path)
-        print("Model saved as <{}>".format(save_path))
+        print("Model saved as < {} >".format(save_path))
         return save_path
     
     def restore(self, sess, save_path): self.saver.restore(sess, save_path)
 
+
+class ProbabilisticCSR(ContinuousSetRegressor):
+    def __init__(
+        self, num_hidden_units=250, hidden_activation=tf.nn.relu,
+        num_hidden_layers_pre_reduce=2, num_hidden_layers_post_reduce=4,
+        num_hidden_layers_pre_output=2, learning_rate=1e-6,
+        loss_function="density", var_clip=0
+    ):
+        self.create_hidden_layers(
+            num_hidden_units, hidden_activation,
+            num_hidden_layers_pre_reduce, num_hidden_layers_post_reduce
+        )
+        # Define mean, log-variance, and STD
+        pre_mean_hidden_layers = [tf.layers.dense(
+            inputs=self.post_reduce_hidden_layers[-1], units=num_hidden_units,
+            activation=hidden_activation, name="pre_mean_1"
+        )]
+        for i in range(1, num_hidden_layers_pre_output):
+            pre_mean_hidden_layers.append(tf.layers.dense(
+                inputs=pre_mean_hidden_layers[-1], units=num_hidden_units,
+                activation=hidden_activation, name="pre_mean_"+str(i+1)
+            ))
+        self.mean = tf.layers.dense(
+            inputs=pre_mean_hidden_layers[-1], units=1, name="mean"
+        )
+
+        pre_logvar_hidden_layers = [tf.layers.dense(
+            inputs=self.post_reduce_hidden_layers[-1], units=num_hidden_units,
+            activation=hidden_activation, name="pre_logvar_1"
+        )]
+        for i in range(1, num_hidden_layers_pre_output):
+            pre_logvar_hidden_layers.append(tf.layers.dense(
+                inputs=pre_logvar_hidden_layers[-1], units=num_hidden_units,
+                activation=hidden_activation, name="pre_logvar_"+str(i+1)
+            ))
+        self.log_var = tf.layers.dense(
+            inputs=pre_logvar_hidden_layers[-1], units=1, name="log_var"
+        )
+        
+        self.std = tf.exp(0.5 * self.log_var)
+
+        # Define loss, training and initialisation operations
+        squared_error = tf.square(self.y_eval - self.mean, name="square-error")
+        
+        # Initialise user-specified loss function
+        if loss_function == "density":
+            # scaled log-gaussian density
+            self.loss_op = tf.reduce_mean(
+                self.log_var + squared_error * tf.exp(-1*self.log_var),
+                name="density_loss"
+            )
+        elif loss_function == "clipped density":
+            # Use soft-clip to regularise gradients
+            def soft_clip(x, y=var_clip): return tf.log(tf.exp(x) + np.exp(y))
+            self.loss_op = tf.reduce_mean(
+                soft_clip(self.log_var)+squared_error*tf.exp(-1*self.log_var),
+                name="density_loss"
+            )
+        elif loss_function == "MSE":
+            # Ignore variance predictions, just use MSE
+            self.loss_op = tf.reduce_mean(squared_error, name="mse_loss")
+        else: raise ValueError("Incorrect loss function specified for PCSR")
+        
+        self.train_op = tf.train.AdamOptimizer(learning_rate).minimize(
+            self.loss_op
+        )
+
+        self.init_op = tf.global_variables_initializer()
+
+        # Create summaries, for visualising in Tensorboard
+        tf.summary.scalar("Loss", self.loss_op)
+        tf.summary.histogram("Mean", self.mean)
+        tf.summary.histogram("Log-variance", self.log_var)
+        self.summary_op = tf.summary.merge_all()
+
+        # Create saver object
+        self.saver = tf.train.Saver()
+
+    def eval_output(
+        self, sess, x_condition, y_condition, x_eval, num_batches=1
+    ):
+        return sess.run(self.mean, feed_dict={
+            self.x_condition: x_condition.reshape(num_batches, -1, 2),
+            self.y_condition: y_condition.reshape(num_batches, -1, 1),
+            self.x_eval: x_eval.reshape(num_batches, -1, 2),
+        })
+    
+    def eval_mean_std(
+        self, sess, x_condition, y_condition, x_eval, num_batches=1
+    ):
+        mean, std = sess.run([self.mean, self.std], feed_dict={
+            self.x_condition: x_condition.reshape(num_batches, -1, 2),
+            self.y_condition: y_condition.reshape(num_batches, -1, 1),
+            self.x_eval: x_eval.reshape(num_batches, -1, 2),
+        })
+        return mean, std
+
+    def sample(
+        self, sess, x_condition, y_condition, x_eval, num_batches=1
+    ):
+        mean, std = self.eval_mean_std(
+            sess, x_condition, y_condition, x_eval, num_batches=1
+        )
+        # print(mean, std, x_eval.shape)
+        return np.random.normal(mean, std)

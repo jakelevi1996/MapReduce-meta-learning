@@ -6,8 +6,12 @@ import matplotlib.pyplot as plt
 from time import time
 import os
 
-from models.neuralmodels import BinarySetRegressor, ContinuousSetRegressor
-from plotting import plot_preds, plot_results, plot_sparse_preds
+from models.neuralmodels import (
+    BinarySetRegressor, ContinuousSetRegressor, ProbabilisticCSR
+)
+from plotting import (
+    plot_preds, plot_results, plot_sparse_preds, plot_probabilistic_preds
+)
 from data.preprocessing import (
     grid, load_raw_mnist, split_binary_image, split_binary_image_batch,
     split_continuous_image, split_continuous_image_batch,
@@ -108,7 +112,7 @@ def train_csr(
     csr, train_images, test_images, batch_size=100, train_ratio=0.9,
     num_epochs=10, print_every=1000, num_plots=30, model_name="csr",
     max_eval_points=75, save_model=False, saved_model_path=None, noise_std=0.1,
-    flip_prob=0
+    flip_prob=0, density_plots=False
 ):
     # Create directory for tensorboard logging
     logdir = "results/summaries/" + model_name
@@ -166,6 +170,13 @@ def train_csr(
                     ))
                     next_print += print_every
 
+        if save_model:
+            saved_model_dir = "results/saved models/{}".format(model_name)
+            while os.path.exists(saved_model_dir): saved_model_dir += "'"
+            os.makedirs(saved_model_dir)
+            saved_model_path = "{}/{}".format(saved_model_dir, model_name)
+            saved_model_path = csr.save(sess, saved_model_path)
+
         # If necessary, adjust number of images to plot, and folder name
         num_plots = min(test_images.shape[0], num_plots)
         folder_name = "results/images/" + model_name
@@ -186,23 +197,25 @@ def train_csr(
             # Generate points and evaluate
             num_x0, num_x1 = 100, 100
             X = grid(num_x0, num_x1)
-            Y = csr.eval_output(sess, x_condition, y_noise, X).reshape(
-                num_x1, num_x0
-            )
             # Plot
             filename = "{}/{}.png".format(folder_name, time())
-            plot_preds(
-                image, y_noise, c_inds, Y, filename=filename,
-                verbose=True
-            )
-
-        if save_model:
-            saved_model_dir = "results/saved models/{}".format(model_name)
-            while os.path.exists(saved_model_dir): saved_model_dir += "'"
-            os.makedirs(saved_model_dir)
-            saved_model_path = "{}/{}".format(saved_model_dir, model_name)
-            # tf.train.Saver().save(sess, folder_name)
-            saved_model_path = csr.save(sess, saved_model_path)
+            if not density_plots:
+                Y = csr.eval_output(sess, x_condition, y_noise, X).reshape(
+                    num_x1, num_x0
+                )
+                plot_preds(
+                    image, y_noise, c_inds, Y, filename=filename,
+                    verbose=True
+                )
+            else:
+                Y, std = csr.eval_mean_std(
+                    sess, x_condition, y_noise, X
+                )
+                Y, std = Y.reshape(num_x1, num_x0), std.reshape(num_x1, num_x0)
+                plot_probabilistic_preds(
+                    image, y_noise, c_inds, Y, std, filename=filename,
+                    verbose=True
+                )
 
 
     print("\n\nTime taken = {:.5} s".format(time() - t_start))
@@ -299,8 +312,7 @@ def train_l1(train_images, test_images):
     tf.reset_default_graph()
 
 def eval_sparse_predictions(
-    train_images, test_images, saved_model_path, sequential=False,
-    num_cnd_points=5
+    saved_model_path, sequential=False, num_cnd_points=5
 ):
     tf.reset_default_graph()
     csr = ContinuousSetRegressor()
@@ -333,6 +345,38 @@ def eval_sparse_predictions(
         plot_sparse_preds(
             num_x0_c, num_x1_c, y_cnd_old, c_inds, y_pred, filename=filename
         )
+
+def eval_recursively_sampled_predictions(
+    csr, saved_model_path, num_cnd_points=5, num_images=10
+):
+    num_x0_c, num_x1_c = 28, 28
+    # Restore model
+    with tf.Session() as sess:
+        csr.restore(sess, saved_model_path)
+        # Repeat for each image to be sampled
+        for _ in range(num_images):
+            x_cnd, y_cnd, c_inds, x_eval = gen_sparse_prediction_inputs(
+                num_x0_c, num_x1_c, num_cnd_points
+            )
+            y_cnd_old = y_cnd
+            x_eval = list(x_eval)
+            while len(x_eval) > 0:
+                x_new = x_eval.pop()
+                y_new = csr.sample(sess, x_cnd, y_cnd, x_new)
+                x_cnd = np.append(x_cnd, [x_new], axis=0)
+                y_cnd = np.append(y_cnd, y_new)
+            filename="results/preds (sequentially sampled)/{}.png".format(
+                time()
+            )
+            num_x0_e, num_x1_e = 100, 100
+            x_eval = grid(num_x0_e, num_x1_e)
+            y_pred = csr.eval_output(sess, x_cnd, y_cnd, x_eval)
+            y_pred = y_pred.reshape(num_x0_e, num_x1_e)
+
+            plot_sparse_preds(
+                num_x0_c, num_x1_c, y_cnd_old, c_inds, y_pred,
+                filename=filename
+            )
     
     
     tf.reset_default_graph()
@@ -364,10 +408,9 @@ if __name__ == "__main__":
 
     print("Loading images...")
     train_images, _, test_images, _ = load_raw_mnist()
-    # images = load_raw_mnist()[0][1:3]
-    # time_image_batch_split(train_images)
-    train_images = test_images = train_images[1:3]
+    # train_images = test_images = train_images[1:3]
 
+    # time_image_batch_split(train_images)
     # np.random.shuffle(train_images)
     # batch_size = 100
     # split_inds = range(batch_size, train_images.shape[0], batch_size)
@@ -380,12 +423,29 @@ if __name__ == "__main__":
     # sweep_noise_prob()
     # sweep_noise_var(train_images, test_images)
     # train_l1()
-    csr = ContinuousSetRegressor()
-    # train_csr(csr, image_batches, model_name="CSR, MSE", save_model=True)
-    train_csr(
-        csr, train_images, test_images, model_name="2 ims", save_model=True,
-        print_every=1, num_epochs=200
+    # csr = ContinuousSetRegressor()
+
+    csr = ProbabilisticCSR(
+        learning_rate=1e-3,
+        num_hidden_layers_post_reduce=3,
+        num_hidden_layers_pre_reduce=3,
+        num_hidden_layers_pre_output=3,
+        loss_function="clipped density", var_clip=-1
     )
+    # # train_csr(csr, image_batches, model_name="CSR, MSE", save_model=True)
+    # loss_val, saved_model_path = train_csr(
+    #     csr, train_images, test_images, model_name="full data, var_clip=-1",
+    #     save_model=True, print_every=500, num_epochs=10,
+    #     # save_model=False, print_every=20, num_epochs=3000,
+    #     noise_std=0.1, density_plots=True
+    # )
+
+    saved_model_path = "results/saved models/full data, var_clip=-1/full data, var_clip=-1"
+
+    eval_recursively_sampled_predictions(
+        csr, saved_model_path, 10
+    )
+
     # for _ in range(10):
     #     eval_sparse_predictions(
     #         saved_model_path, sequential=False, num_cnd_points=50
